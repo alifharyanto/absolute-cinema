@@ -1,98 +1,1489 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
+import {
+  createElement,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ComponentRef,
+} from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  Image,
+  ImageBackground,
+  Keyboard,
+  Modal,
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  useWindowDimensions,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
+import { BlurTargetView } from 'expo-blur';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { WebView } from 'react-native-webview';
+import {
+  LiquidGlassCard,
+  LiquidGlassContainer,
+} from '@/components/liquid-glass';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
+const IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
+const PROFILE_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w185';
+const TMDB_API_KEY = process.env.EXPO_PUBLIC_TMDB_API_KEY;
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
+type Movie = {
+  id: number;
+  title: string;
+  overview: string;
+  poster_path: string | null;
+  backdrop_path: string | null;
+  vote_average: number;
+  release_date?: string;
+  media_type?: 'movie' | 'tv';
+};
+
+type MovieResponse = {
+  results: Movie[];
+};
+
+type TvShow = {
+  id: number;
+  name: string;
+  overview: string;
+  poster_path: string | null;
+  backdrop_path: string | null;
+  vote_average: number;
+  first_air_date?: string;
+};
+
+type TvResponse = {
+  results: TvShow[];
+};
+
+type TrailerVideo = {
+  key: string;
+  site: string;
+  type: string;
+  official: boolean;
+};
+
+type TrailerResponse = {
+  results: TrailerVideo[];
+};
+
+type MoviePerson = {
+  id: number;
+  name: string;
+  character?: string;
+  job?: string;
+  profile_path: string | null;
+};
+
+type WatchProvider = {
+  provider_id: number;
+  provider_name: string;
+  logo_path: string | null;
+};
+
+type WatchRegion = {
+  link?: string;
+  flatrate?: WatchProvider[];
+  free?: WatchProvider[];
+  ads?: WatchProvider[];
+  rent?: WatchProvider[];
+  buy?: WatchProvider[];
+};
+
+type MovieDetails = {
+  credits?: {
+    cast: MoviePerson[];
+    crew: MoviePerson[];
+  };
+  status?: string;
+  created_by?: MoviePerson[];
+  original_language?: string;
+  spoken_languages?: {
+    english_name: string;
+    iso_639_1: string;
+    name: string;
+  }[];
+  'watch/providers'?: {
+    results: Record<string, WatchRegion>;
+  };
+};
+
+const PROVIDER_CATEGORIES = [
+  { key: 'flatrate', label: 'Streaming' },
+  { key: 'free', label: 'Free' },
+  { key: 'ads', label: 'Free with ads' },
+  { key: 'rent', label: 'Rent' },
+  { key: 'buy', label: 'Buy' },
+] as const;
+
+function getMovieStatusLabel(status?: string) {
+  switch (status) {
+    case 'Released':
+      return 'Released';
+    case 'Post Production':
+      return 'Post-production';
+    case 'In Production':
+      return 'In production';
+    case 'Planned':
+      return 'Planned';
+    case 'Canceled':
+      return 'Canceled';
+    case 'Rumored':
+      return 'Rumored';
+    default:
+      return status || 'Not available';
   }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
+}
+
+const SECTIONS = [
+  {
+    id: 'theater',
+    title: 'Now Showing in Theaters',
+    endpoint: '/movie/now_playing?region=ID',
+    mediaType: 'movie',
+  },
+  {
+    id: 'tv',
+    title: 'Now Airing on TV',
+    endpoint: '/tv/on_the_air',
+    mediaType: 'tv',
+  },
+  {
+    id: 'cartoons',
+    title: 'Cartoons',
+    endpoint: '/discover/movie?with_genres=16',
+    mediaType: 'movie',
+  },
+  { id: 'popular', title: 'Popular Movies', endpoint: '/movie/popular', mediaType: 'movie' },
+  { id: 'top-rated', title: 'Top Rated', endpoint: '/movie/top_rated', mediaType: 'movie' },
+  {
+    id: 'action',
+    title: 'Action Movies',
+    endpoint: '/discover/movie?with_genres=28',
+    mediaType: 'movie',
+  },
+  {
+    id: 'comedies',
+    title: 'Comedies',
+    endpoint: '/discover/movie?with_genres=35',
+    mediaType: 'movie',
+  },
+] as const;
+
+type SectionId = (typeof SECTIONS)[number]['id'];
+
+async function fetchFromTmdb<T>(
+  endpoint: string,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (!TMDB_API_KEY) {
+    throw new Error(
+      'TMDB API key is missing. Add EXPO_PUBLIC_TMDB_API_KEY to your .env file.',
     );
   }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
+
+  const separator = endpoint.includes('?') ? '&' : '?';
+  const response = await fetch(
+    `${TMDB_BASE_URL}${endpoint}${separator}api_key=${encodeURIComponent(TMDB_API_KEY)}`,
+    { signal },
+  );
+
+  if (!response.ok) {
+    throw new Error(`TMDB request failed (HTTP ${response.status}).`);
+  }
+
+  return (await response.json()) as T;
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : 'An unknown error occurred.';
+}
+
+function MovieCard({
+  movie,
+  onPress,
+}: {
+  movie: Movie;
+  onPress: (movie: Movie) => void;
+}) {
   return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`View details for ${movie.title}`}
+      onPress={() => onPress(movie)}
+      style={({ pressed }) => [styles.movieCard, pressed && styles.pressed]}>
+      {movie.poster_path ? (
+        <Image
+          source={{ uri: `${IMAGE_BASE_URL}${movie.poster_path}` }}
+          style={styles.poster}
+          resizeMode="cover"
+        />
+      ) : (
+        <View style={[styles.poster, styles.posterFallback]}>
+          <Text style={styles.posterFallbackText}>Poster unavailable</Text>
+        </View>
+      )}
+      <Text numberOfLines={2} style={styles.movieTitle}>
+        {movie.title}
+      </Text>
+      <Text style={styles.movieRating}>★ {movie.vote_average.toFixed(1)}</Text>
+    </Pressable>
+  );
+}
+
+function PersonPortrait({
+  person,
+  subtitle,
+}: {
+  person: MoviePerson;
+  subtitle: string;
+}) {
+  return (
+    <View style={styles.personCard}>
+      {person.profile_path ? (
+        <Image
+          source={{ uri: `${PROFILE_IMAGE_BASE_URL}${person.profile_path}` }}
+          style={styles.personPhoto}
+        />
+      ) : (
+        <View style={[styles.personPhoto, styles.personFallback]}>
+          <Text style={styles.personInitial}>{person.name.charAt(0)}</Text>
+        </View>
+      )}
+      <Text numberOfLines={2} style={styles.personName}>
+        {person.name}
+      </Text>
+      <Text numberOfLines={2} style={styles.personRole}>
+        {subtitle}
+      </Text>
+    </View>
   );
 }
 
 export default function HomeScreen() {
+  const [trendingMovies, setTrendingMovies] = useState<Movie[]>([]);
+  const [heroIndex, setHeroIndex] = useState(0);
+  const [heroError, setHeroError] = useState('');
+  const [sectionMovies, setSectionMovies] = useState<
+    Partial<Record<SectionId, Movie[]>>
+  >({});
+  const [sectionErrors, setSectionErrors] = useState<
+    Partial<Record<SectionId, string>>
+  >({});
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [searchText, setSearchText] = useState('');
+  const [searchResults, setSearchResults] = useState<Movie[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState('');
+  const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
+  const [trailer, setTrailer] = useState<TrailerVideo | null>(null);
+  const [trailerLoading, setTrailerLoading] = useState(false);
+  const [trailerError, setTrailerError] = useState('');
+  const [movieCredits, setMovieCredits] = useState<MovieDetails | null>(null);
+  const [creditsLoading, setCreditsLoading] = useState(false);
+  const [creditsError, setCreditsError] = useState('');
+  const [myList, setMyList] = useState<number[]>([]);
+  const blurTargetRef = useRef<ComponentRef<typeof View> | null>(null);
+  const trendingListRef = useRef<FlatList<Movie> | null>(null);
+  const currentHeroIndex = useRef(0);
+  const { width: screenWidth } = useWindowDimensions();
+  const isSearching = searchText.trim().length > 0;
+
+  const loadCatalog = useCallback(async (isRefresh = false) => {
+    if (isRefresh) {
+      setRefreshing(true);
+    }
+
+    setHeroError('');
+    setSectionErrors({});
+    const requests = [
+      fetchFromTmdb<MovieResponse>('/trending/movie/day?language=en-US'),
+      ...SECTIONS.map((section) =>
+        fetchFromTmdb<MovieResponse | TvResponse>(
+          `${section.endpoint}${section.endpoint.includes('?') ? '&' : '?'}language=en-US`,
+        ),
+      ),
+    ];
+    const results = await Promise.allSettled(requests);
+    const [trendingResult, ...sectionResults] = results;
+
+    if (trendingResult.status === 'fulfilled') {
+      setTrendingMovies(
+        (trendingResult.value as MovieResponse).results.slice(0, 3),
+      );
+      setHeroIndex(0);
+      currentHeroIndex.current = 0;
+      trendingListRef.current?.scrollToOffset({ offset: 0, animated: false });
+    } else {
+      setHeroError(getErrorMessage(trendingResult.reason));
+    }
+
+    const nextMovies: Partial<Record<SectionId, Movie[]>> = {};
+    const nextErrors: Partial<Record<SectionId, string>> = {};
+    sectionResults.forEach((result, index) => {
+      const section = SECTIONS[index];
+      if (result.status === 'fulfilled') {
+        const response = result.value;
+        nextMovies[section.id] =
+          section.mediaType === 'tv'
+            ? (response as TvResponse).results.map((show) => ({
+                id: show.id,
+                title: show.name,
+                overview: show.overview,
+                poster_path: show.poster_path,
+                backdrop_path: show.backdrop_path,
+                vote_average: show.vote_average,
+                release_date: show.first_air_date,
+                media_type: 'tv',
+              }))
+            : (response as MovieResponse).results.map((movie) => ({
+                ...movie,
+                media_type: 'movie',
+              }));
+      } else {
+        nextErrors[section.id] = getErrorMessage(result.reason);
+      }
+    });
+    setSectionMovies(nextMovies);
+    setSectionErrors(nextErrors);
+    setInitialLoading(false);
+    setRefreshing(false);
+  }, []);
+
+  useEffect(() => {
+    const timeout = setTimeout(() => void loadCatalog(), 0);
+    return () => clearTimeout(timeout);
+  }, [loadCatalog]);
+
+  useEffect(() => {
+    if (trendingMovies.length < 2 || isSearching || selectedMovie) {
+      return;
+    }
+
+    const interval = setInterval(() => {
+      const nextIndex = (currentHeroIndex.current + 1) % trendingMovies.length;
+      currentHeroIndex.current = nextIndex;
+      setHeroIndex(nextIndex);
+      trendingListRef.current?.scrollToIndex({
+        index: nextIndex,
+        animated: true,
+      });
+    }, 5500);
+
+    return () => clearInterval(interval);
+  }, [trendingMovies.length, isSearching, selectedMovie]);
+
+  useEffect(() => {
+    const query = searchText.trim();
+    if (!query) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      setSearchLoading(true);
+      setSearchError('');
+      void fetchFromTmdb<MovieResponse>(
+        `/search/movie?query=${encodeURIComponent(query)}&language=en-US&include_adult=false`,
+        controller.signal,
+      )
+        .then((response) => setSearchResults(response.results))
+        .catch((error: unknown) => {
+          if (!controller.signal.aborted) {
+            setSearchError(getErrorMessage(error));
+          }
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) {
+            setSearchLoading(false);
+          }
+        });
+    }, 350);
+
+    return () => {
+      clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [searchText]);
+
+  useEffect(() => {
+    if (!selectedMovie) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const mediaPath = selectedMovie.media_type === 'tv' ? 'tv' : 'movie';
+
+    const loadMovieDetails = async () => {
+      try {
+        const [videosResult, creditsResult] = await Promise.allSettled([
+          fetchFromTmdb<TrailerResponse>(
+            `/${mediaPath}/${selectedMovie.id}/videos?language=en-US`,
+            controller.signal,
+          ),
+          fetchFromTmdb<MovieDetails>(
+            `/${mediaPath}/${selectedMovie.id}?language=en-US&append_to_response=credits,watch/providers`,
+            controller.signal,
+          ),
+        ]);
+
+        if (controller.signal.aborted) return;
+
+        if (creditsResult.status === 'fulfilled') {
+          setMovieCredits(creditsResult.value);
+        } else {
+          setCreditsError(getErrorMessage(creditsResult.reason));
+        }
+
+        if (videosResult.status === 'rejected') {
+          throw videosResult.reason;
+        }
+
+        let videos = videosResult.value.results.filter(
+          (video) => video.site === 'YouTube' && video.type === 'Trailer',
+        );
+        if (videos.length === 0) {
+          const englishResponse = await fetchFromTmdb<TrailerResponse>(
+            `/${mediaPath}/${selectedMovie.id}/videos?language=en-US`,
+            controller.signal,
+          );
+          videos = englishResponse.results.filter(
+            (video) => video.site === 'YouTube' && video.type === 'Trailer',
+          );
+        }
+        videos.sort((first, second) => Number(second.official) - Number(first.official));
+        setTrailer(videos[0] ?? null);
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setTrailerError(getErrorMessage(error));
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setTrailerLoading(false);
+          setCreditsLoading(false);
+        }
+      }
+    };
+
+    void loadMovieDetails();
+    return () => controller.abort();
+  }, [selectedMovie]);
+
+  const openMovie = useCallback((movie: Movie) => {
+    Keyboard.dismiss();
+    setTrailer(null);
+    setTrailerError('');
+    setTrailerLoading(true);
+    setMovieCredits(null);
+    setCreditsError('');
+    setCreditsLoading(true);
+    setSelectedMovie(movie);
+  }, []);
+
+  const toggleMyList = useCallback((movie: Movie) => {
+    setMyList((current) =>
+      current.includes(movie.id)
+        ? current.filter((id) => id !== movie.id)
+        : [...current, movie.id],
+    );
+  }, []);
+
+  const trailerMarkup = trailer
+    ? `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"></head><body style="margin:0;background:#000"><iframe width="100%" height="100%" src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(trailer.key)}?playsinline=1" title="Trailer YouTube" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe></body></html>`
+    : '';
+  const directors = [
+    ...(movieCredits?.created_by ?? []),
+    ...(movieCredits?.credits?.crew.filter((member) => member.job === 'Director') ?? []),
+  ].filter(
+    (person, index, people) =>
+      people.findIndex((candidate) => candidate.id === person.id) === index,
+  );
+  const cast = movieCredits?.credits?.cast ?? [];
+  const indonesiaProviders = movieCredits?.['watch/providers']?.results.ID;
+  const displayedProviders = PROVIDER_CATEGORIES.flatMap((category) =>
+    (indonesiaProviders?.[category.key] ?? []).map((provider) => ({
+      ...provider,
+      categoryLabel: category.label,
+    })),
+  )
+    .filter(
+      (provider, index, providers) =>
+        providers.findIndex(
+          (candidate) => candidate.provider_id === provider.provider_id,
+        ) === index,
+    )
+    .slice(0, 2);
+
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+      <StatusBar barStyle="light-content" />
+      <View style={styles.header}>
+        <Text style={styles.brand}>ABSOLUTE</Text>
+        <Text style={styles.brandAccent}>CINEMA</Text>
+      </View>
 
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
+      <BlurTargetView ref={blurTargetRef} style={styles.screen}>
+        <ScrollView
+          style={styles.screen}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          refreshControl={
+            <RefreshControl
+              tintColor={COLORS.red}
+              colors={[COLORS.red]}
+              refreshing={refreshing}
+              onRefresh={() => void loadCatalog(true)}
+            />
+          }>
+        {isSearching ? (
+          <View style={styles.searchSection}>
+            <Text style={styles.sectionTitle}>Search Results</Text>
+            {searchLoading && (
+              <ActivityIndicator color={COLORS.red} style={styles.inlineLoader} />
+            )}
+            {searchError ? <Text style={styles.errorText}>{searchError}</Text> : null}
+            {!searchLoading && !searchError && searchResults.length === 0 ? (
+              <Text style={styles.helperText}>No matching movies found.</Text>
+            ) : null}
+            <FlatList
+              data={searchResults}
+              keyExtractor={(movie) => String(movie.id)}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.movieList}
+              renderItem={({ item }) => <MovieCard movie={item} onPress={openMovie} />}
+            />
+          </View>
+        ) : (
+          <>
+            <View style={styles.heroContainer}>
+              {trendingMovies.length > 0 ? (
+                <>
+                  <FlatList
+                    ref={trendingListRef}
+                    data={trendingMovies}
+                    horizontal
+                    pagingEnabled
+                    bounces={false}
+                    showsHorizontalScrollIndicator={false}
+                    keyExtractor={(movie) => String(movie.id)}
+                    getItemLayout={(_, index) => ({
+                      length: screenWidth,
+                      offset: screenWidth * index,
+                      index,
+                    })}
+                    onMomentumScrollEnd={(
+                      event: NativeSyntheticEvent<NativeScrollEvent>,
+                    ) => {
+                      const index = Math.round(
+                        event.nativeEvent.contentOffset.x / screenWidth,
+                      );
+                      currentHeroIndex.current = index;
+                      setHeroIndex(index);
+                    }}
+                    renderItem={({ item }) => {
+                      const content = (
+                        <>
+                          <View style={styles.heroShade} />
+                          <HeroContent
+                            movie={item}
+                            inList={myList.includes(item.id)}
+                            onPlay={() => openMovie(item)}
+                            onToggleList={() => toggleMyList(item)}
+                          />
+                        </>
+                      );
 
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
+                      return item.backdrop_path ? (
+                        <ImageBackground
+                          source={{
+                            uri: `${IMAGE_BASE_URL}${item.backdrop_path}`,
+                          }}
+                          resizeMode="cover"
+                          style={[styles.hero, { width: screenWidth }]}>
+                          {content}
+                        </ImageBackground>
+                      ) : (
+                        <View
+                          style={[
+                            styles.hero,
+                            styles.heroFallback,
+                            { width: screenWidth },
+                          ]}>
+                          {content}
+                        </View>
+                      );
+                    }}
+                  />
+                  <View style={styles.heroPagination}>
+                    {trendingMovies.map((movie, index) => (
+                      <Pressable
+                        key={movie.id}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Show trending item ${index + 1}`}
+                        onPress={() => {
+                          currentHeroIndex.current = index;
+                          setHeroIndex(index);
+                          trendingListRef.current?.scrollToIndex({
+                            index,
+                            animated: true,
+                          });
+                        }}
+                        style={[
+                          styles.heroDot,
+                          index === heroIndex && styles.heroDotActive,
+                        ]}
+                      />
+                    ))}
+                  </View>
+                </>
+              ) : (
+                <View style={[styles.hero, styles.heroFallback]}>
+                  <View style={styles.heroShade} />
+                  <View style={styles.heroMessage}>
+                    {initialLoading ? (
+                      <ActivityIndicator color={COLORS.red} size="large" />
+                    ) : (
+                      <Text style={styles.errorText}>
+                        {heroError || 'Trending movies are unavailable.'}
+                      </Text>
+                    )}
+                  </View>
+                </View>
+              )}
+            </View>
+
+            {SECTIONS.map((section) => (
+              <View key={section.id} style={styles.section}>
+                <Text style={styles.sectionTitle}>{section.title}</Text>
+                {sectionErrors[section.id] ? (
+                  <Text style={styles.errorText}>{sectionErrors[section.id]}</Text>
+                ) : null}
+                {!sectionMovies[section.id] && initialLoading ? (
+                  <ActivityIndicator color={COLORS.red} style={styles.inlineLoader} />
+                ) : null}
+                <FlatList
+                  data={sectionMovies[section.id] ?? []}
+                  keyExtractor={(movie) => String(movie.id)}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.movieList}
+                  renderItem={({ item }) => <MovieCard movie={item} onPress={openMovie} />}
+                />
+              </View>
+            ))}
+          </>
+        )}
+        </ScrollView>
+      </BlurTargetView>
+
+      <LiquidGlassContainer
+        blurTarget={blurTargetRef}
+        intensity={70}
+        tint="dark"
+        style={styles.searchDock}>
+        <Text style={styles.searchIcon}>⌕</Text>
+        <TextInput
+          accessibilityLabel="Search movies"
+          autoCapitalize="none"
+          autoCorrect={false}
+          onChangeText={(text) => {
+            setSearchText(text);
+            setSearchResults([]);
+            setSearchError('');
+            setSearchLoading(Boolean(text.trim()));
+          }}
+          placeholder="Search movies..."
+          placeholderTextColor={COLORS.muted}
+          returnKeyType="search"
+          style={styles.searchInput}
+          value={searchText}
+        />
+        {searchLoading && <ActivityIndicator color={COLORS.red} size="small" />}
+        {searchText.length > 0 && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Clear search"
+            onPress={() => {
+              setSearchText('');
+              Keyboard.dismiss();
+            }}
+            style={styles.clearSearch}>
+            <Text style={styles.clearSearchText}>×</Text>
+          </Pressable>
+        )}
+      </LiquidGlassContainer>
+
+      <Modal
+        visible={selectedMovie !== null}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setSelectedMovie(null)}>
+        <View style={styles.modalRoot}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Close details"
+            onPress={() => setSelectedMovie(null)}
+            style={styles.modalBackdrop}
           />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
+          <LiquidGlassContainer
+            intensity={55}
+            tint="dark"
+            style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+              onPress={() => setSelectedMovie(null)}
+              style={styles.closeButton}>
+              <Text style={styles.closeButtonText}>×</Text>
+            </Pressable>
+            {selectedMovie && (
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.modalContent}>
+                <View style={styles.detailHeading}>
+                  {selectedMovie.poster_path ? (
+                    <Image
+                      source={{ uri: `${IMAGE_BASE_URL}${selectedMovie.poster_path}` }}
+                      style={styles.detailPoster}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View style={[styles.detailPoster, styles.posterFallback]} />
+                  )}
+                  <View style={styles.detailCopy}>
+                    <Text style={styles.detailTitle}>{selectedMovie.title}</Text>
+                    <Text style={styles.detailRating}>
+                      ★ {selectedMovie.vote_average.toFixed(1)} / 10
+                    </Text>
+                    <Text style={styles.detailYear}>
+                      Release: {selectedMovie.release_date || 'Unknown'}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.creditsBlock}>
+                  <View style={styles.metadataRow}>
+                    <Text style={styles.creditLabel}>
+                      {selectedMovie.media_type === 'tv' ? 'TV STATUS' : 'MOVIE STATUS'}
+                    </Text>
+                    <Text style={styles.metadataValue}>
+                      {creditsLoading
+                        ? 'Loading...'
+                        : getMovieStatusLabel(movieCredits?.status)}
+                    </Text>
+                  </View>
+                  <View style={[styles.metadataRow, styles.metadataSpacing]}>
+                    <Text style={styles.creditLabel}>LANGUAGE</Text>
+                    <Text style={styles.metadataValue}>
+                      {creditsLoading
+                        ? 'Loading...'
+                        : `${movieCredits?.original_language?.toUpperCase() ?? '—'} · ${
+                            movieCredits?.spoken_languages
+                              ?.map(
+                                (language) =>
+                                  language.english_name || language.iso_639_1.toUpperCase(),
+                              )
+                              .join(', ') || 'Not available'
+                          }`}
+                    </Text>
+                  </View>
+                  <Text style={[styles.creditLabel, styles.peopleSectionTitle]}>
+                    {selectedMovie.media_type === 'tv' ? 'CREATOR / DIRECTOR' : 'DIRECTOR'}
+                  </Text>
+                  {creditsLoading ? (
+                    <ActivityIndicator color={COLORS.red} size="small" />
+                  ) : directors.length > 0 ? (
+                    <FlatList
+                      data={directors}
+                      horizontal
+                      keyExtractor={(person) => String(person.id)}
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={styles.peopleList}
+                      renderItem={({ item }) => (
+                        <PersonPortrait
+                          person={item}
+                          subtitle={selectedMovie.media_type === 'tv' ? 'Creator' : 'Director'}
+                        />
+                      )}
+                    />
+                  ) : (
+                    <Text style={styles.creditValue}>Not available</Text>
+                  )}
+                  <Text style={[styles.creditLabel, styles.peopleSectionTitle]}>
+                    CAST
+                  </Text>
+                  {creditsLoading ? (
+                    <ActivityIndicator color={COLORS.red} size="small" />
+                  ) : cast.length > 0 ? (
+                    <FlatList
+                      data={cast.slice(0, 12)}
+                      horizontal
+                      keyExtractor={(person) => String(person.id)}
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={styles.peopleList}
+                      renderItem={({ item }) => (
+                        <PersonPortrait
+                          person={item}
+                          subtitle={item.character || 'Cast member'}
+                        />
+                      )}
+                    />
+                  ) : (
+                    <Text style={styles.creditValue}>Not available</Text>
+                  )}
+                  {creditsError ? (
+                    <Text style={styles.helperText}>{creditsError}</Text>
+                  ) : null}
+                  <Text style={[styles.creditLabel, styles.peopleSectionTitle]}>
+                    AVAILABLE ON
+                  </Text>
+                  {creditsLoading ? (
+                    <ActivityIndicator color={COLORS.red} size="small" />
+                  ) : (
+                    <View style={styles.providerList}>
+                      {displayedProviders.map((provider) => (
+                        <View
+                          key={provider.provider_id}
+                          style={styles.providerItem}>
+                          {provider.logo_path ? (
+                            <Image
+                              source={{
+                                uri: `${PROFILE_IMAGE_BASE_URL}${provider.logo_path}`,
+                              }}
+                              style={styles.providerLogo}
+                              accessibilityLabel={provider.provider_name}
+                            />
+                          ) : (
+                            <View style={styles.providerLogoFallback}>
+                              <Text style={styles.providerInitial}>
+                                {provider.provider_name.charAt(0)}
+                              </Text>
+                            </View>
+                          )}
+                          <Text style={styles.providerName}>
+                            {provider.provider_name}
+                          </Text>
+                          <Text style={styles.providerCategory}>
+                            {provider.categoryLabel}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                  {!creditsLoading &&
+                    displayedProviders.length === 0 && (
+                      <Text style={styles.creditValue}>
+                        Streaming information is unavailable in Indonesia.
+                      </Text>
+                    )}
+                  {displayedProviders.length > 0 ? (
+                    <Text style={styles.attribution}>
+                      Streaming information provided by JustWatch via TMDB.
+                    </Text>
+                  ) : null}
+                </View>
+                <Text style={styles.overviewTitle}>Overview</Text>
+                <Text style={styles.overview}>
+                  {selectedMovie.overview || 'No overview available.'}
+                </Text>
 
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+                <Text style={styles.trailerTitle}>Trailer</Text>
+                {trailerLoading ? (
+                  <ActivityIndicator color={COLORS.red} style={styles.trailerLoader} />
+                ) : trailer ? (
+                  <View style={styles.webViewFrame}>
+                    {Platform.OS === 'web' ? (
+                      createElement('iframe', {
+                        allow:
+                          'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share',
+                        allowFullScreen: true,
+                        title: `Trailer ${selectedMovie.title}`,
+                        src: `https://www.youtube-nocookie.com/embed/${encodeURIComponent(trailer.key)}?playsinline=1&controls=1`,
+                        style: {
+                          width: '100%',
+                          height: '100%',
+                          border: 0,
+                        },
+                      })
+                    ) : (
+                      <WebView
+                        allowsInlineMediaPlayback
+                        javaScriptEnabled
+                        mediaPlaybackRequiresUserAction
+                        originWhitelist={['https://www.youtube-nocookie.com']}
+                        source={{ html: trailerMarkup }}
+                        style={styles.webView}
+                      />
+                    )}
+                  </View>
+                ) : (
+                  <Text style={styles.helperText}>
+                    {trailerError || 'No YouTube trailer is available for this title.'}
+                  </Text>
+                )}
+                {trailerError && trailer ? (
+                  <Text style={styles.errorText}>{trailerError}</Text>
+                ) : null}
+              </ScrollView>
+            )}
+          </LiquidGlassContainer>
+        </View>
+      </Modal>
+    </SafeAreaView>
   );
 }
 
+function HeroContent({
+  movie,
+  inList,
+  onPlay,
+  onToggleList,
+}: {
+  movie: Movie;
+  inList: boolean;
+  onPlay: () => void;
+  onToggleList: () => void;
+}) {
+  return (
+    <View style={styles.heroContent}>
+      <LiquidGlassCard intensity={42}>
+        <Text style={styles.trendingLabel}># TRENDING</Text>
+        <Text numberOfLines={2} style={styles.heroTitle}>
+          {movie.title}
+        </Text>
+        <Text style={styles.heroRating}>★ {movie.vote_average.toFixed(1)} / 10</Text>
+        <Text numberOfLines={3} style={styles.heroOverview}>
+          {movie.overview || 'No overview available.'}
+        </Text>
+        <View style={styles.heroActions}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={onPlay}
+            style={({ pressed }) => [styles.playButton, pressed && styles.pressed]}>
+            <Text style={styles.playButtonText}>▶  Play Trailer</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            onPress={onToggleList}
+            style={({ pressed }) => [
+              styles.myListButton,
+              pressed && styles.pressed,
+            ]}>
+            <Text style={styles.myListButtonText}>
+              {inList ? '✓  My List' : '+  My List'}
+            </Text>
+          </Pressable>
+        </View>
+      </LiquidGlassCard>
+    </View>
+  );
+}
+
+const COLORS = {
+  background: '#141414',
+  red: '#E50914',
+  text: '#FFFFFF',
+  muted: '#A3A3A3',
+};
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
-  },
   safeArea: {
     flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
+    backgroundColor: COLORS.background,
   },
-  heroSection: {
+  screen: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
+  header: {
+    zIndex: 2,
+    elevation: 2,
+    flexShrink: 0,
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 4,
+    backgroundColor: COLORS.background,
+  },
+  brand: {
+    color: COLORS.red,
+    fontSize: 22,
+    fontWeight: '900',
+    letterSpacing: 2,
+  },
+  brandAccent: {
+    color: COLORS.text,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 4.2,
+    marginTop: -2,
+    marginBottom: 2,
+  },
+  searchIcon: {
+    color: COLORS.muted,
+    fontSize: 25,
+    lineHeight: 28,
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    color: COLORS.text,
+    fontSize: 15,
+    paddingVertical: 9,
+  },
+  clearSearch: {
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+  },
+  clearSearchText: {
+    color: COLORS.muted,
+    fontSize: 24,
+    lineHeight: 26,
+  },
+  scrollContent: {
+    paddingBottom: 104,
+  },
+  heroContainer: {
+    marginBottom: 22,
+  },
+  heroPagination: {
+    position: 'absolute',
+    bottom: 12,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+  },
+  heroDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.48)',
+  },
+  heroDotActive: {
+    width: 20,
+    backgroundColor: COLORS.red,
+  },
+  hero: {
+    height: 480,
+    justifyContent: 'flex-end',
+    backgroundColor: '#292929',
+  },
+  heroFallback: {
+    justifyContent: 'center',
+  },
+  heroShade: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(0, 0, 0, 0.48)',
+  },
+  heroContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 46,
+  },
+  heroMessage: {
+    paddingHorizontal: 22,
+    alignItems: 'center',
+  },
+  trendingLabel: {
+    color: COLORS.red,
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 2,
+    marginBottom: 8,
+  },
+  heroTitle: {
+    color: COLORS.text,
+    fontSize: 34,
+    fontWeight: '900',
+    lineHeight: 39,
+    maxWidth: 420,
+  },
+  heroRating: {
+    color: '#FFD166',
+    fontSize: 14,
+    fontWeight: '700',
+    marginTop: 8,
+  },
+  heroOverview: {
+    color: '#E5E5E5',
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 8,
+    maxWidth: 480,
+  },
+  heroActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 16,
+    gap: 10,
+  },
+  playButton: {
+    minHeight: 43,
+    paddingHorizontal: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.text,
+    borderRadius: 5,
+  },
+  playButtonText: {
+    color: '#111111',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  myListButton: {
+    minHeight: 43,
+    paddingHorizontal: 15,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(75, 75, 75, 0.88)',
+    borderRadius: 5,
+  },
+  myListButtonText: {
+    color: COLORS.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  section: {
+    marginBottom: 25,
+  },
+  searchSection: {
+    minHeight: 380,
+    paddingTop: 8,
+  },
+  sectionTitle: {
+    color: COLORS.text,
+    fontSize: 20,
+    fontWeight: '800',
+    marginHorizontal: 20,
+    marginBottom: 12,
+  },
+  movieList: {
+    paddingHorizontal: 20,
+    gap: 12,
+    paddingBottom: 6,
+  },
+  movieCard: {
+    width: 132,
+  },
+  poster: {
+    width: 132,
+    height: 190,
+    borderRadius: 6,
+    backgroundColor: '#292929',
+  },
+  posterFallback: {
     alignItems: 'center',
     justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
+    padding: 8,
   },
-  title: {
+  posterFallbackText: {
+    color: COLORS.muted,
+    fontSize: 12,
     textAlign: 'center',
   },
-  code: {
-    textTransform: 'uppercase',
+  movieTitle: {
+    color: COLORS.text,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 17,
+    marginTop: 7,
+    minHeight: 34,
   },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
+  movieRating: {
+    color: '#FFD166',
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 3,
+  },
+  inlineLoader: {
+    marginVertical: 18,
+  },
+  errorText: {
+    color: '#FF8A8A',
+    fontSize: 13,
+    lineHeight: 19,
+    marginHorizontal: 20,
+    marginBottom: 10,
+  },
+  helperText: {
+    color: COLORS.muted,
+    fontSize: 14,
+    lineHeight: 21,
+    marginHorizontal: 20,
+    marginVertical: 10,
+  },
+  modalRoot: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0, 0, 0, 0.62)',
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFill,
+  },
+  modalSheet: {
+    maxHeight: '88%',
+    minHeight: '58%',
+    backgroundColor: 'rgba(28, 28, 28, 0.88)',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    overflow: 'hidden',
+  },
+  modalHandle: {
+    alignSelf: 'center',
+    width: 42,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#666666',
+    marginTop: 10,
+  },
+  closeButton: {
+    position: 'absolute',
+    zIndex: 2,
+    right: 16,
+    top: 16,
+    width: 34,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 17,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+  },
+  closeButtonText: {
+    color: COLORS.text,
+    fontSize: 27,
+    lineHeight: 29,
+  },
+  modalContent: {
+    paddingHorizontal: 20,
+    paddingTop: 26,
+    paddingBottom: 36,
+  },
+  detailHeading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingRight: 28,
+    gap: 14,
+  },
+  detailPoster: {
+    width: 92,
+    height: 138,
+    borderRadius: 6,
+    backgroundColor: '#292929',
+  },
+  detailCopy: {
+    flex: 1,
+  },
+  detailTitle: {
+    color: COLORS.text,
+    fontSize: 22,
+    fontWeight: '800',
+    lineHeight: 27,
+  },
+  detailRating: {
+    color: '#FFD166',
+    fontSize: 14,
+    fontWeight: '700',
+    marginTop: 10,
+  },
+  detailYear: {
+    color: COLORS.muted,
+    fontSize: 13,
+    marginTop: 6,
+  },
+  creditsBlock: {
+    marginTop: 18,
+    padding: 14,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  creditLabel: {
+    color: COLORS.red,
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    marginBottom: 5,
+  },
+  actorsLabel: {
+    marginTop: 14,
+  },
+  creditValue: {
+    color: '#E5E5E5',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  metadataRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  metadataSpacing: {
+    marginTop: 12,
+  },
+  metadataValue: {
+    flex: 1,
+    color: '#E5E5E5',
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'right',
+  },
+  peopleSectionTitle: {
+    marginTop: 18,
+  },
+  peopleList: {
+    gap: 12,
+    paddingRight: 6,
+  },
+  personCard: {
+    width: 82,
+    alignItems: 'center',
+  },
+  personPhoto: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#343434',
+  },
+  personFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  personInitial: {
+    color: COLORS.text,
+    fontSize: 24,
+    fontWeight: '700',
+  },
+  personName: {
+    color: COLORS.text,
+    fontSize: 11,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginTop: 7,
+  },
+  personRole: {
+    color: COLORS.muted,
+    fontSize: 10,
+    lineHeight: 14,
+    textAlign: 'center',
+    marginTop: 2,
+  },
+  providerCategory: {
+    color: '#E5E5E5',
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 7,
+  },
+  providerList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  providerItem: {
+    width: 82,
+    minHeight: 88,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    padding: 8,
+    borderRadius: 13,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  providerLogo: {
+    width: 38,
+    height: 38,
+    borderRadius: 6,
+    backgroundColor: '#343434',
+  },
+  providerLogoFallback: {
+    width: 38,
+    height: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 6,
+    backgroundColor: '#343434',
+  },
+  providerInitial: {
+    color: COLORS.text,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  providerName: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    lineHeight: 13,
+    textAlign: 'center',
+  },
+  attribution: {
+    color: COLORS.muted,
+    fontSize: 10,
+    marginTop: 12,
+  },
+  overviewTitle: {
+    color: COLORS.text,
+    fontSize: 17,
+    fontWeight: '800',
+    marginTop: 22,
+    marginBottom: 8,
+  },
+  overview: {
+    color: '#D2D2D2',
+    fontSize: 14,
+    lineHeight: 22,
+  },
+  trailerTitle: {
+    color: COLORS.text,
+    fontSize: 17,
+    fontWeight: '800',
+    marginTop: 24,
+    marginBottom: 12,
+  },
+  trailerLoader: {
+    height: 110,
+  },
+  webViewFrame: {
+    width: '100%',
+    aspectRatio: 16 / 9,
+    overflow: 'hidden',
+    borderRadius: 8,
+    backgroundColor: '#000000',
+  },
+  webView: {
+    flex: 1,
+    backgroundColor: '#000000',
+  },
+  searchDock: {
+    position: 'absolute',
+    left: 18,
+    right: 18,
+    bottom: 22,
+    minHeight: 58,
+    paddingHorizontal: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    backgroundColor: 'rgba(32, 32, 32, 0.78)',
+    overflow: 'hidden',
+  },
+  pressed: {
+    opacity: 0.78,
   },
 });
