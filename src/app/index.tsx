@@ -4,7 +4,6 @@ import {
   useEffect,
   useRef,
   useState,
-  type ComponentRef,
 } from 'react';
 import {
   ActivityIndicator,
@@ -26,13 +25,9 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
-import { BlurTargetView } from 'expo-blur';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
-import {
-  LiquidGlassCard,
-  LiquidGlassContainer,
-} from '@/components/liquid-glass';
+import { LiquidGlassContainer } from '@/components/liquid-glass';
 
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
@@ -150,33 +145,33 @@ function getMovieStatusLabel(status?: string) {
 const SECTIONS = [
   {
     id: 'theater',
-    title: 'Now Showing in Theaters',
+    title: 'Sedang Tayang di Bioskop',
     endpoint: '/movie/now_playing?region=ID',
     mediaType: 'movie',
   },
   {
     id: 'tv',
-    title: 'Now Airing on TV',
+    title: 'Sedang Tayang di TV',
     endpoint: '/tv/on_the_air',
     mediaType: 'tv',
   },
   {
     id: 'cartoons',
-    title: 'Cartoons',
+    title: 'Film Animasi',
     endpoint: '/discover/movie?with_genres=16',
     mediaType: 'movie',
   },
-  { id: 'popular', title: 'Popular Movies', endpoint: '/movie/popular', mediaType: 'movie' },
-  { id: 'top-rated', title: 'Top Rated', endpoint: '/movie/top_rated', mediaType: 'movie' },
+  { id: 'popular', title: 'Film Populer', endpoint: '/movie/popular', mediaType: 'movie' },
+  { id: 'top-rated', title: 'Rating Tertinggi', endpoint: '/movie/top_rated', mediaType: 'movie' },
   {
     id: 'action',
-    title: 'Action Movies',
+    title: 'Film Action',
     endpoint: '/discover/movie?with_genres=28',
     mediaType: 'movie',
   },
   {
     id: 'comedies',
-    title: 'Comedies',
+    title: 'Film Komedi',
     endpoint: '/discover/movie?with_genres=35',
     mediaType: 'movie',
   },
@@ -218,20 +213,33 @@ function MovieCard({
   movie: Movie;
   onPress: (movie: Movie) => void;
 }) {
+  const { width } = useWindowDimensions();
+  const cardWidth = width >= 900 ? 150 : width >= 600 ? 128 : 108;
+  const posterHeight = cardWidth * 1.48;
+
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`View details for ${movie.title}`}
       onPress={() => onPress(movie)}
-      style={({ pressed }) => [styles.movieCard, pressed && styles.pressed]}>
+      style={({ pressed }) => [
+        styles.movieCard,
+        { width: cardWidth },
+        pressed && styles.pressed,
+      ]}>
       {movie.poster_path ? (
         <Image
           source={{ uri: `${IMAGE_BASE_URL}${movie.poster_path}` }}
-          style={styles.poster}
+          style={[styles.poster, { width: cardWidth, height: posterHeight }]}
           resizeMode="cover"
         />
       ) : (
-        <View style={[styles.poster, styles.posterFallback]}>
+        <View
+          style={[
+            styles.poster,
+            styles.posterFallback,
+            { width: cardWidth, height: posterHeight },
+          ]}>
           <Text style={styles.posterFallbackText}>Poster unavailable</Text>
         </View>
       )}
@@ -296,10 +304,10 @@ export default function HomeScreen() {
   const [creditsLoading, setCreditsLoading] = useState(false);
   const [creditsError, setCreditsError] = useState('');
   const [myList, setMyList] = useState<number[]>([]);
-  const blurTargetRef = useRef<ComponentRef<typeof View> | null>(null);
   const trendingListRef = useRef<FlatList<Movie> | null>(null);
   const currentHeroIndex = useRef(0);
   const { width: screenWidth } = useWindowDimensions();
+  const heroHeight = Math.min(Math.max(screenWidth * 0.74, 290), 520);
   const isSearching = searchText.trim().length > 0;
 
   const loadCatalog = useCallback(async (isRefresh = false) => {
@@ -531,38 +539,73 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
       <StatusBar barStyle="light-content" />
       <View style={styles.header}>
-        <Text style={styles.brand}>ABSOLUTE</Text>
-        <Text style={styles.brandAccent}>CINEMA</Text>
+        <View style={styles.headerTop}>
+          <Text style={styles.brand}>
+            Absolute<Text style={styles.brandAccent}>cinema</Text>
+          </Text>
+        </View>
+        <View style={styles.searchField}>
+          <Text style={styles.searchIcon}>⌕</Text>
+          <TextInput
+            accessibilityLabel="Search movies"
+            autoCapitalize="none"
+            autoCorrect={false}
+            onChangeText={(text) => {
+              setSearchText(text);
+              setSearchResults([]);
+              setSearchError('');
+              setSearchLoading(Boolean(text.trim()));
+            }}
+            placeholder="Cari film, aktor, genre..."
+            placeholderTextColor={COLORS.muted}
+            returnKeyType="search"
+            style={styles.searchInput}
+            value={searchText}
+          />
+          {searchLoading && <ActivityIndicator color={COLORS.red} size="small" />}
+          {searchText.length > 0 && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Clear search"
+              onPress={() => {
+                setSearchText('');
+                Keyboard.dismiss();
+              }}
+              style={styles.clearSearch}>
+              <Text style={styles.clearSearchText}>×</Text>
+            </Pressable>
+          )}
+        </View>
       </View>
 
-      <BlurTargetView ref={blurTargetRef} style={styles.screen}>
-        <ScrollView
-          style={styles.screen}
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-          refreshControl={
-            <RefreshControl
-              tintColor={COLORS.red}
-              colors={[COLORS.red]}
-              refreshing={refreshing}
-              onRefresh={() => void loadCatalog(true)}
-            />
-          }>
+      <ScrollView
+        style={styles.screen}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl
+            tintColor={COLORS.red}
+            colors={[COLORS.red]}
+            refreshing={refreshing}
+            onRefresh={() => void loadCatalog(true)}
+          />
+        }>
         {isSearching ? (
           <View style={styles.searchSection}>
-            <Text style={styles.sectionTitle}>Search Results</Text>
+            <Text style={styles.sectionTitle}>Hasil Pencarian</Text>
             {searchLoading && (
               <ActivityIndicator color={COLORS.red} style={styles.inlineLoader} />
             )}
             {searchError ? <Text style={styles.errorText}>{searchError}</Text> : null}
             {!searchLoading && !searchError && searchResults.length === 0 ? (
-              <Text style={styles.helperText}>No matching movies found.</Text>
+              <Text style={styles.helperText}>Film tidak ditemukan.</Text>
             ) : null}
             <FlatList
               data={searchResults}
               keyExtractor={(movie) => String(movie.id)}
               horizontal
               showsHorizontalScrollIndicator={false}
+              style={styles.movieStrip}
               contentContainerStyle={styles.movieList}
               renderItem={({ item }) => <MovieCard movie={item} onPress={openMovie} />}
             />
@@ -613,7 +656,7 @@ export default function HomeScreen() {
                             uri: `${IMAGE_BASE_URL}${item.backdrop_path}`,
                           }}
                           resizeMode="cover"
-                          style={[styles.hero, { width: screenWidth }]}>
+                          style={[styles.hero, { width: screenWidth, height: heroHeight }]}>
                           {content}
                         </ImageBackground>
                       ) : (
@@ -621,7 +664,7 @@ export default function HomeScreen() {
                           style={[
                             styles.hero,
                             styles.heroFallback,
-                            { width: screenWidth },
+                            { width: screenWidth, height: heroHeight },
                           ]}>
                           {content}
                         </View>
@@ -651,7 +694,7 @@ export default function HomeScreen() {
                   </View>
                 </>
               ) : (
-                <View style={[styles.hero, styles.heroFallback]}>
+                <View style={[styles.hero, styles.heroFallback, { height: heroHeight }]}>
                   <View style={styles.heroShade} />
                   <View style={styles.heroMessage}>
                     {initialLoading ? (
@@ -680,6 +723,7 @@ export default function HomeScreen() {
                   keyExtractor={(movie) => String(movie.id)}
                   horizontal
                   showsHorizontalScrollIndicator={false}
+                  style={styles.movieStrip}
                   contentContainerStyle={styles.movieList}
                   renderItem={({ item }) => <MovieCard movie={item} onPress={openMovie} />}
                 />
@@ -687,45 +731,7 @@ export default function HomeScreen() {
             ))}
           </>
         )}
-        </ScrollView>
-      </BlurTargetView>
-
-      <LiquidGlassContainer
-        blurTarget={blurTargetRef}
-        intensity={70}
-        tint="dark"
-        style={styles.searchDock}>
-        <Text style={styles.searchIcon}>⌕</Text>
-        <TextInput
-          accessibilityLabel="Search movies"
-          autoCapitalize="none"
-          autoCorrect={false}
-          onChangeText={(text) => {
-            setSearchText(text);
-            setSearchResults([]);
-            setSearchError('');
-            setSearchLoading(Boolean(text.trim()));
-          }}
-          placeholder="Search movies..."
-          placeholderTextColor={COLORS.muted}
-          returnKeyType="search"
-          style={styles.searchInput}
-          value={searchText}
-        />
-        {searchLoading && <ActivityIndicator color={COLORS.red} size="small" />}
-        {searchText.length > 0 && (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Clear search"
-            onPress={() => {
-              setSearchText('');
-              Keyboard.dismiss();
-            }}
-            style={styles.clearSearch}>
-            <Text style={styles.clearSearchText}>×</Text>
-          </Pressable>
-        )}
-      </LiquidGlassContainer>
+      </ScrollView>
 
       <Modal
         visible={selectedMovie !== null}
@@ -960,8 +966,8 @@ function HeroContent({
 }) {
   return (
     <View style={styles.heroContent}>
-      <LiquidGlassCard intensity={42}>
-        <Text style={styles.trendingLabel}># TRENDING</Text>
+      <View style={styles.heroCopy}>
+        <Text style={styles.trendingLabel}>UNGGULAN</Text>
         <Text numberOfLines={2} style={styles.heroTitle}>
           {movie.title}
         </Text>
@@ -974,7 +980,7 @@ function HeroContent({
             accessibilityRole="button"
             onPress={onPlay}
             style={({ pressed }) => [styles.playButton, pressed && styles.pressed]}>
-            <Text style={styles.playButtonText}>▶  Play Trailer</Text>
+            <Text style={styles.playButtonText}>▶  Tonton Trailer</Text>
           </Pressable>
           <Pressable
             accessibilityRole="button"
@@ -984,20 +990,20 @@ function HeroContent({
               pressed && styles.pressed,
             ]}>
             <Text style={styles.myListButtonText}>
-              {inList ? '✓  My List' : '+  My List'}
+              {inList ? '✓  Daftar Saya' : '+  Daftar Saya'}
             </Text>
           </Pressable>
         </View>
-      </LiquidGlassCard>
+      </View>
     </View>
   );
 }
 
 const COLORS = {
-  background: '#141414',
-  red: '#E50914',
+  background: '#050B15',
+  red: '#F12B3D',
   text: '#FFFFFF',
-  muted: '#A3A3A3',
+  muted: '#94A3B8',
 };
 
 const styles = StyleSheet.create({
@@ -1014,35 +1020,57 @@ const styles = StyleSheet.create({
     elevation: 2,
     flexShrink: 0,
     paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 4,
+    paddingTop: 10,
+    paddingBottom: 12,
     backgroundColor: COLORS.background,
+    borderBottomWidth: 1,
+    borderBottomColor: '#111C2B',
+  },
+  headerTop: {
+    width: '100%',
+    maxWidth: 1200,
+    alignSelf: 'center',
+    height: 34,
+    justifyContent: 'center',
   },
   brand: {
-    color: COLORS.red,
-    fontSize: 22,
+    color: COLORS.text,
+    fontSize: 21,
     fontWeight: '900',
-    letterSpacing: 2,
+    letterSpacing: -0.8,
   },
   brandAccent: {
-    color: COLORS.text,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 4.2,
-    marginTop: -2,
-    marginBottom: 2,
+    color: COLORS.red,
+    fontSize: 21,
+    fontWeight: '900',
+    letterSpacing: -0.8,
+  },
+  searchField: {
+    width: '100%',
+    maxWidth: 1200,
+    minHeight: 44,
+    alignSelf: 'center',
+    marginTop: 9,
+    paddingHorizontal: 13,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#1C293A',
+    backgroundColor: '#101A29',
+    overflow: 'hidden',
   },
   searchIcon: {
-    color: COLORS.muted,
-    fontSize: 25,
-    lineHeight: 28,
-    marginRight: 8,
+    color: '#A5B2C4',
+    fontSize: 22,
+    lineHeight: 26,
+    marginRight: 10,
   },
   searchInput: {
     flex: 1,
     color: COLORS.text,
-    fontSize: 15,
-    paddingVertical: 9,
+    fontSize: 13,
+    paddingVertical: 8,
   },
   clearSearch: {
     paddingHorizontal: 5,
@@ -1054,10 +1082,10 @@ const styles = StyleSheet.create({
     lineHeight: 26,
   },
   scrollContent: {
-    paddingBottom: 104,
+    paddingBottom: 34,
   },
   heroContainer: {
-    marginBottom: 22,
+    marginBottom: 24,
   },
   heroPagination: {
     position: 'absolute',
@@ -1080,65 +1108,71 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.red,
   },
   hero: {
-    height: 480,
     justifyContent: 'flex-end',
-    backgroundColor: '#292929',
+    backgroundColor: '#101827',
   },
   heroFallback: {
     justifyContent: 'center',
   },
   heroShade: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0, 0, 0, 0.48)',
+    backgroundColor: 'rgba(2, 8, 17, 0.52)',
   },
   heroContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 46,
+    width: '100%',
+    maxWidth: 1200,
+    alignSelf: 'center',
+    paddingHorizontal: 24,
+    paddingBottom: 52,
+  },
+  heroCopy: {
+    width: '100%',
+    maxWidth: 520,
   },
   heroMessage: {
     paddingHorizontal: 22,
     alignItems: 'center',
   },
   trendingLabel: {
-    color: COLORS.red,
-    fontSize: 12,
+    color: '#FF7A86',
+    fontSize: 10,
     fontWeight: '900',
     letterSpacing: 2,
-    marginBottom: 8,
+    marginBottom: 6,
   },
   heroTitle: {
     color: COLORS.text,
-    fontSize: 34,
+    fontSize: 32,
     fontWeight: '900',
-    lineHeight: 39,
-    maxWidth: 420,
+    lineHeight: 37,
+    maxWidth: 520,
   },
   heroRating: {
     color: '#FFD166',
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '700',
-    marginTop: 8,
+    marginTop: 6,
   },
   heroOverview: {
-    color: '#E5E5E5',
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 8,
-    maxWidth: 480,
+    color: '#D5DCE7',
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 7,
+    maxWidth: 500,
   },
   heroActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 16,
-    gap: 10,
+    marginTop: 13,
+    gap: 9,
   },
   playButton: {
-    minHeight: 43,
-    paddingHorizontal: 16,
+    minHeight: 40,
+    paddingHorizontal: 17,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: COLORS.text,
-    borderRadius: 5,
+    borderRadius: 12,
   },
   playButtonText: {
     color: '#111111',
@@ -1146,12 +1180,14 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   myListButton: {
-    minHeight: 43,
+    minHeight: 40,
     paddingHorizontal: 15,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(75, 75, 75, 0.88)',
-    borderRadius: 5,
+    backgroundColor: 'rgba(16, 26, 41, 0.9)',
+    borderColor: 'rgba(255,255,255,0.18)',
+    borderWidth: 1,
+    borderRadius: 12,
   },
   myListButtonText: {
     color: COLORS.text,
@@ -1159,32 +1195,43 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   section: {
+    width: '100%',
+    maxWidth: 1200,
+    alignSelf: 'center',
     marginBottom: 25,
   },
   searchSection: {
     minHeight: 380,
-    paddingTop: 8,
+    width: '100%',
+    maxWidth: 1200,
+    alignSelf: 'center',
+    paddingTop: 18,
   },
   sectionTitle: {
     color: COLORS.text,
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '800',
     marginHorizontal: 20,
-    marginBottom: 12,
+    marginBottom: 13,
   },
   movieList: {
     paddingHorizontal: 20,
-    gap: 12,
+    gap: 13,
     paddingBottom: 6,
   },
+  movieStrip: {
+    width: '100%',
+    maxWidth: 1200,
+    alignSelf: 'center',
+  },
   movieCard: {
-    width: 132,
+    width: 108,
   },
   poster: {
-    width: 132,
-    height: 190,
-    borderRadius: 6,
-    backgroundColor: '#292929',
+    width: 108,
+    height: 160,
+    borderRadius: 11,
+    backgroundColor: '#111C2B',
   },
   posterFallback: {
     alignItems: 'center',
@@ -1198,17 +1245,17 @@ const styles = StyleSheet.create({
   },
   movieTitle: {
     color: COLORS.text,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
-    lineHeight: 17,
-    marginTop: 7,
-    minHeight: 34,
+    lineHeight: 16,
+    marginTop: 8,
+    minHeight: 32,
   },
   movieRating: {
     color: '#FFD166',
     fontSize: 12,
     fontWeight: '700',
-    marginTop: 3,
+    marginTop: 2,
   },
   inlineLoader: {
     marginVertical: 18,
@@ -1230,17 +1277,22 @@ const styles = StyleSheet.create({
   modalRoot: {
     flex: 1,
     justifyContent: 'flex-end',
+    alignItems: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.62)',
   },
   modalBackdrop: {
     ...StyleSheet.absoluteFill,
   },
   modalSheet: {
+    width: '100%',
+    maxWidth: 940,
     maxHeight: '88%',
     minHeight: '58%',
-    backgroundColor: 'rgba(28, 28, 28, 0.88)',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    backgroundColor: 'rgba(10, 18, 30, 0.98)',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
     overflow: 'hidden',
   },
   modalHandle: {
@@ -1269,6 +1321,9 @@ const styles = StyleSheet.create({
     lineHeight: 29,
   },
   modalContent: {
+    width: '100%',
+    maxWidth: 860,
+    alignSelf: 'center',
     paddingHorizontal: 20,
     paddingTop: 26,
     paddingBottom: 36,
@@ -1309,7 +1364,9 @@ const styles = StyleSheet.create({
     marginTop: 18,
     padding: 14,
     borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    backgroundColor: '#101A29',
+    borderWidth: 1,
+    borderColor: '#1D293A',
   },
   creditLabel: {
     color: COLORS.red,
@@ -1467,21 +1524,6 @@ const styles = StyleSheet.create({
   webView: {
     flex: 1,
     backgroundColor: '#000000',
-  },
-  searchDock: {
-    position: 'absolute',
-    left: 18,
-    right: 18,
-    bottom: 22,
-    minHeight: 58,
-    paddingHorizontal: 15,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
-    backgroundColor: 'rgba(32, 32, 32, 0.78)',
-    overflow: 'hidden',
   },
   pressed: {
     opacity: 0.78,
