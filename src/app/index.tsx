@@ -28,6 +28,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { LiquidGlassContainer } from '@/components/liquid-glass';
+import { useIsHydrated } from '@/hooks/use-is-hydrated';
 
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
@@ -213,7 +214,8 @@ function MovieCard({
   movie: Movie;
   onPress: (movie: Movie) => void;
 }) {
-  const { width } = useWindowDimensions();
+  const { width: viewportWidth } = useWindowDimensions();
+  const width = useIsHydrated() ? viewportWidth : 390;
   const cardWidth = width >= 900 ? 150 : width >= 600 ? 128 : 108;
   const posterHeight = cardWidth * 1.48;
 
@@ -306,7 +308,8 @@ export default function HomeScreen() {
   const [myList, setMyList] = useState<number[]>([]);
   const trendingListRef = useRef<FlatList<Movie> | null>(null);
   const currentHeroIndex = useRef(0);
-  const { width: screenWidth } = useWindowDimensions();
+  const { width: viewportWidth } = useWindowDimensions();
+  const screenWidth = useIsHydrated() ? viewportWidth : 390;
   const heroHeight = Math.min(Math.max(screenWidth * 0.74, 290), 520);
   const isSearching = searchText.trim().length > 0;
 
@@ -548,6 +551,7 @@ export default function HomeScreen() {
           <Text style={styles.searchIcon}>⌕</Text>
           <TextInput
             accessibilityLabel="Search movies"
+            nativeID="movie-search-input"
             autoCapitalize="none"
             autoCorrect={false}
             onChangeText={(text) => {
@@ -1051,14 +1055,8 @@ const styles = StyleSheet.create({
     minHeight: 44,
     alignSelf: 'center',
     marginTop: 9,
-    paddingHorizontal: 13,
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#1C293A',
-    backgroundColor: '#101A29',
-    overflow: 'hidden',
   },
   searchIcon: {
     color: '#A5B2C4',
@@ -1071,6 +1069,8 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     fontSize: 13,
     paddingVertical: 8,
+    borderWidth: 0,
+    outlineWidth: 0,
   },
   clearSearch: {
     paddingHorizontal: 5,
