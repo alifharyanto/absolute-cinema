@@ -14,10 +14,9 @@ export default function RootLayout() {
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <AnimatedSplashOverlay />
-      
-      {/* Stack Navigator untuk memuat halaman index dan watch/[id] */}
+
       <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="index" />
+        <Stack.Screen name="(tabs)" />
         <Stack.Screen name="watch/[id]" />
       </Stack>
     </ThemeProvider>
