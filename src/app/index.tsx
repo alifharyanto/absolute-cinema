@@ -1,31 +1,32 @@
 import { LiquidGlassContainer } from '@/components/liquid-glass';
 import { useIsHydrated } from '@/hooks/use-is-hydrated';
+import { useRouter } from 'expo-router';
 import {
-    createElement,
-    useCallback,
-    useEffect,
-    useRef,
-    useState,
+  createElement,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
 } from 'react';
 import {
-    ActivityIndicator,
-    FlatList,
-    Image,
-    ImageBackground,
-    Keyboard,
-    Modal,
-    Platform,
-    Pressable,
-    RefreshControl,
-    ScrollView,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
-    useWindowDimensions,
-    type NativeScrollEvent,
-    type NativeSyntheticEvent,
+  ActivityIndicator,
+  FlatList,
+  Image,
+  ImageBackground,
+  Keyboard,
+  Modal,
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
@@ -283,6 +284,7 @@ function PersonPortrait({
 }
 
 export default function HomeScreen() {
+  const router = useRouter();
   const [trendingMovies, setTrendingMovies] = useState<Movie[]>([]);
   const [heroIndex, setHeroIndex] = useState(0);
   const [heroError, setHeroError] = useState('');
@@ -299,6 +301,7 @@ export default function HomeScreen() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState('');
   const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
+
   const [trailer, setTrailer] = useState<TrailerVideo | null>(null);
   const [trailerLoading, setTrailerLoading] = useState(false);
   const [trailerError, setTrailerError] = useState('');
@@ -351,19 +354,19 @@ export default function HomeScreen() {
         nextMovies[section.id] =
           section.mediaType === 'tv'
             ? (response as TvResponse).results.map((show) => ({
-                id: show.id,
-                title: show.name,
-                overview: show.overview,
-                poster_path: show.poster_path,
-                backdrop_path: show.backdrop_path,
-                vote_average: show.vote_average,
-                release_date: show.first_air_date,
-                media_type: 'tv',
-              }))
+              id: show.id,
+              title: show.name,
+              overview: show.overview,
+              poster_path: show.poster_path,
+              backdrop_path: show.backdrop_path,
+              vote_average: show.vote_average,
+              release_date: show.first_air_date,
+              media_type: 'tv',
+            }))
             : (response as MovieResponse).results.map((movie) => ({
-                ...movie,
-                media_type: 'movie',
-              }));
+              ...movie,
+              media_type: 'movie',
+            }));
       } else {
         nextErrors[section.id] = getErrorMessage(result.reason);
       }
@@ -397,9 +400,10 @@ export default function HomeScreen() {
     return () => clearInterval(interval);
   }, [trendingMovies.length, isSearching, selectedMovie]);
 
-  useEffect(() => {
+useEffect(() => {
     const query = searchText.trim();
     if (!query) {
+      setSearchResults([]);
       return;
     }
 
@@ -407,11 +411,27 @@ export default function HomeScreen() {
     const timeout = setTimeout(() => {
       setSearchLoading(true);
       setSearchError('');
-      void fetchFromTmdb<MovieResponse>(
-        `/search/movie?query=${encodeURIComponent(query)}&language=en-US&include_adult=false`,
+
+      // Menggunakan /search/multi agar bisa mencari Film sekaligus Drakor / TV Show
+      void fetchFromTmdb<{ results: any[] }>(
+        `/search/multi?query=${encodeURIComponent(query)}&language=en-US&include_adult=false`,
         controller.signal,
       )
-        .then((response) => setSearchResults(response.results))
+        .then((response) => {
+          const formattedResults: Movie[] = response.results
+            .filter((item) => item.media_type === 'movie' || item.media_type === 'tv')
+            .map((item) => ({
+              id: item.id,
+              title: item.title || item.name || 'Untitled',
+              overview: item.overview || '',
+              poster_path: item.poster_path || null,
+              backdrop_path: item.backdrop_path || null,
+              vote_average: item.vote_average || 0,
+              release_date: item.release_date || item.first_air_date || '',
+              media_type: item.media_type as 'movie' | 'tv',
+            }));
+          setSearchResults(formattedResults);
+        })
         .catch((error: unknown) => {
           if (!controller.signal.aborted) {
             setSearchError(getErrorMessage(error));
@@ -524,6 +544,7 @@ export default function HomeScreen() {
   );
   const cast = movieCredits?.credits?.cast ?? [];
   const indonesiaProviders = movieCredits?.['watch/providers']?.results.ID;
+  const watchLink = indonesiaProviders?.link;
   const displayedProviders = PROVIDER_CATEGORIES.flatMap((category) =>
     (indonesiaProviders?.[category.key] ?? []).map((provider) => ({
       ...provider,
@@ -739,12 +760,16 @@ export default function HomeScreen() {
         visible={selectedMovie !== null}
         animationType="slide"
         transparent
-        onRequestClose={() => setSelectedMovie(null)}>
+        onRequestClose={() => {
+          setSelectedMovie(null);
+        }}>
         <View style={styles.modalRoot}>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Close details"
-            onPress={() => setSelectedMovie(null)}
+            onPress={() => {
+              setSelectedMovie(null);
+            }}
             style={styles.modalBackdrop}
           />
           <LiquidGlassContainer
@@ -755,7 +780,9 @@ export default function HomeScreen() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Close"
-              onPress={() => setSelectedMovie(null)}
+              onPress={() => {
+                setSelectedMovie(null);
+              }}
               style={styles.closeButton}>
               <Text style={styles.closeButtonText}>×</Text>
             </Pressable>
@@ -783,6 +810,66 @@ export default function HomeScreen() {
                     </Text>
                   </View>
                 </View>
+
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Watch ${selectedMovie.title}`}
+                  onPress={() => {
+                    if (!selectedMovie) return;
+
+                    const movieId = selectedMovie.id;
+                    const mediaType = selectedMovie.media_type ?? 'movie';
+
+                    // 1. Jalankan navigasi menggunakan URL string langsung (paling stabil)
+                    router.push(`/watch/${movieId}?type=${mediaType}`);
+
+                    // 2. Tutup modal setelah perintah navigasi dikirim
+                    setSelectedMovie(null);
+                  }}
+                  style={({ pressed }) => [
+                    styles.watchNowButton,
+                    pressed && styles.pressed,
+                  ]}>
+                  <Text style={styles.watchNowText}>KLIK DETAIL HERE</Text>
+                </Pressable>
+
+                <Text style={styles.trailerTitle}>Trailer</Text>
+                {trailerLoading ? (
+                  <ActivityIndicator color={COLORS.red} style={styles.trailerLoader} />
+                ) : trailer ? (
+                  <View style={styles.webViewFrame}>
+                    {Platform.OS === 'web' ? (
+                      createElement('iframe', {
+                        allow:
+                          'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share',
+                        allowFullScreen: true,
+                        title: `Trailer ${selectedMovie.title}`,
+                        src: `https://www.youtube-nocookie.com/embed/${encodeURIComponent(trailer.key)}?playsinline=1&controls=1`,
+                        style: {
+                          width: '100%',
+                          height: '100%',
+                          border: 0,
+                        },
+                      })
+                    ) : (
+                      <WebView
+                        allowsInlineMediaPlayback
+                        javaScriptEnabled
+                        mediaPlaybackRequiresUserAction
+                        originWhitelist={['https://www.youtube-nocookie.com']}
+                        source={{ html: trailerMarkup }}
+                        style={styles.webView}
+                      />
+                    )}
+                  </View>
+                ) : (
+                  <Text style={styles.helperText}>
+                    {trailerError || 'No YouTube trailer is available for this title.'}
+                  </Text>
+                )}
+                {trailerError && trailer ? (
+                  <Text style={styles.errorText}>{trailerError}</Text>
+                ) : null}
                 <View style={styles.creditsBlock}>
                   <View style={styles.metadataRow}>
                     <Text style={styles.creditLabel}>
@@ -799,14 +886,13 @@ export default function HomeScreen() {
                     <Text style={styles.metadataValue}>
                       {creditsLoading
                         ? 'Loading...'
-                        : `${movieCredits?.original_language?.toUpperCase() ?? '—'} · ${
-                            movieCredits?.spoken_languages
-                              ?.map(
-                                (language) =>
-                                  language.english_name || language.iso_639_1.toUpperCase(),
-                              )
-                              .join(', ') || 'Not available'
-                          }`}
+                        : `${movieCredits?.original_language?.toUpperCase() ?? '—'} · ${movieCredits?.spoken_languages
+                          ?.map(
+                            (language) =>
+                              language.english_name || language.iso_639_1.toUpperCase(),
+                          )
+                          .join(', ') || 'Not available'
+                        }`}
                     </Text>
                   </View>
                   <Text style={[styles.creditLabel, styles.peopleSectionTitle]}>
@@ -908,44 +994,6 @@ export default function HomeScreen() {
                 <Text style={styles.overview}>
                   {selectedMovie.overview || 'No overview available.'}
                 </Text>
-
-                <Text style={styles.trailerTitle}>Trailer</Text>
-                {trailerLoading ? (
-                  <ActivityIndicator color={COLORS.red} style={styles.trailerLoader} />
-                ) : trailer ? (
-                  <View style={styles.webViewFrame}>
-                    {Platform.OS === 'web' ? (
-                      createElement('iframe', {
-                        allow:
-                          'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share',
-                        allowFullScreen: true,
-                        title: `Trailer ${selectedMovie.title}`,
-                        src: `https://www.youtube-nocookie.com/embed/${encodeURIComponent(trailer.key)}?playsinline=1&controls=1`,
-                        style: {
-                          width: '100%',
-                          height: '100%',
-                          border: 0,
-                        },
-                      })
-                    ) : (
-                      <WebView
-                        allowsInlineMediaPlayback
-                        javaScriptEnabled
-                        mediaPlaybackRequiresUserAction
-                        originWhitelist={['https://www.youtube-nocookie.com']}
-                        source={{ html: trailerMarkup }}
-                        style={styles.webView}
-                      />
-                    )}
-                  </View>
-                ) : (
-                  <Text style={styles.helperText}>
-                    {trailerError || 'No YouTube trailer is available for this title.'}
-                  </Text>
-                )}
-                {trailerError && trailer ? (
-                  <Text style={styles.errorText}>{trailerError}</Text>
-                ) : null}
               </ScrollView>
             )}
           </LiquidGlassContainer>
@@ -1365,6 +1413,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 6,
   },
+  watchNowButton: {
+    minHeight: 46,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 18,
+    borderRadius: 8,
+    backgroundColor: COLORS.red,
+  },
+  watchNowButtonDisabled: {
+    opacity: 0.45,
+  },
+  watchNowText: {
+    color: COLORS.text,
+    fontSize: 14,
+    fontWeight: '800',
+  },
   creditsBlock: {
     marginTop: 18,
     padding: 14,
@@ -1513,7 +1577,7 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     fontSize: 17,
     fontWeight: '800',
-    marginTop: 24,
+    marginTop: 20,
     marginBottom: 12,
   },
   trailerLoader: {
