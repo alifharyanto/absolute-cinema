@@ -1,34 +1,34 @@
+import { LiquidGlassContainer } from '@/components/liquid-glass';
+import { useIsHydrated } from '@/hooks/use-is-hydrated';
 import {
-  createElement,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
+    createElement,
+    useCallback,
+    useEffect,
+    useRef,
+    useState,
 } from 'react';
 import {
-  ActivityIndicator,
-  FlatList,
-  Image,
-  ImageBackground,
-  Keyboard,
-  Modal,
-  Platform,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-  useWindowDimensions,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
+    ActivityIndicator,
+    FlatList,
+    Image,
+    ImageBackground,
+    Keyboard,
+    Modal,
+    Platform,
+    Pressable,
+    RefreshControl,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
+    useWindowDimensions,
+    type NativeScrollEvent,
+    type NativeSyntheticEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
-import { LiquidGlassContainer } from '@/components/liquid-glass';
-import { useIsHydrated } from '@/hooks/use-is-hydrated';
 
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
@@ -604,15 +604,13 @@ export default function HomeScreen() {
             {!searchLoading && !searchError && searchResults.length === 0 ? (
               <Text style={styles.helperText}>Film tidak ditemukan.</Text>
             ) : null}
-            <FlatList
-              data={searchResults}
-              keyExtractor={(movie) => String(movie.id)}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.movieStrip}
-              contentContainerStyle={styles.movieList}
-              renderItem={({ item }) => <MovieCard movie={item} onPress={openMovie} />}
-            />
+            <View style={styles.movieStrip}>
+              <View style={styles.searchMovieGrid}>
+                {searchResults.map((movie) => (
+                  <MovieCard key={movie.id} movie={movie} onPress={openMovie} />
+                ))}
+              </View>
+            </View>
           </View>
         ) : (
           <>
@@ -1215,6 +1213,13 @@ const styles = StyleSheet.create({
     marginBottom: 13,
   },
   movieList: {
+    paddingHorizontal: 20,
+    gap: 13,
+    paddingBottom: 6,
+  },
+  searchMovieGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     paddingHorizontal: 20,
     gap: 13,
     paddingBottom: 6,
