@@ -61,27 +61,18 @@ export default function AppTabs() {
       />
       <Tabs.Screen
         name="search"
-        options={{
-          title: 'Cari',
-          tabBarIcon: ({ color }) => (
-            <SymbolView
-              name={{ ios: 'magnifyingglass', android: 'search', web: 'search' }}
-              tintColor={color}
-              size={22}
-            />
-          ),
-        }}
+        options={{ href: null }}
       />
       <Tabs.Screen
         name="account"
         options={{
-          title: 'Akun',
+          title: 'Histori',
           tabBarIcon: ({ color, focused }) => (
             <SymbolView
               name={{
-                ios: focused ? 'person.crop.circle.fill' : 'person.crop.circle',
-                android: 'account_circle',
-                web: 'account_circle',
+                ios: focused ? 'clock.arrow.circlepath' : 'clock',
+                android: 'history',
+                web: 'history',
               }}
               tintColor={color}
               size={22}

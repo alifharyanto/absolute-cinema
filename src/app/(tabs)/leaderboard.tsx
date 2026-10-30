@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'expo-router';
 import {
     ActivityIndicator,
     Image,
-    Pressable,
     ScrollView,
     StatusBar,
     StyleSheet,
@@ -10,6 +10,10 @@ import {
     View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Animated, { FadeInDown } from 'react-native-reanimated';
+
+import { SmoothPressable } from '@/components/smooth-pressable';
+import { useVisitHistory } from '@/components/visit-history';
 
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w185';
@@ -40,6 +44,8 @@ const COLORS = {
 };
 
 export default function LeaderboardScreen() {
+  const router = useRouter();
+  const { addVisitedMovie } = useVisitHistory();
   const [movies, setMovies] = useState<TrendingMovie[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -97,7 +103,7 @@ export default function LeaderboardScreen() {
         ) : error ? (
           <View style={styles.emptyState}>
             <Text style={styles.error}>{error}</Text>
-            <Pressable
+            <SmoothPressable
               accessibilityRole="button"
               onPress={() => {
                 setLoading(true);
@@ -106,12 +112,32 @@ export default function LeaderboardScreen() {
               }}
               style={styles.retryButton}>
               <Text style={styles.retryText}>Coba lagi</Text>
-            </Pressable>
+            </SmoothPressable>
           </View>
         ) : (
           <View style={styles.list}>
             {movies.map((movie, index) => (
-              <View key={movie.id} style={styles.movieRow}>
+              <Animated.View
+                key={movie.id}
+                entering={FadeInDown.delay(Math.min(index, 8) * 30).duration(240)}>
+                <SmoothPressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Buka ${movie.title}`}
+                  onPress={() => {
+                    addVisitedMovie({
+                      id: movie.id,
+                      title: movie.title,
+                      media_type: 'movie',
+                      poster_path: movie.poster_path,
+                      release_date: movie.release_date,
+                      vote_average: movie.vote_average,
+                    });
+                    router.push({
+                      pathname: '/watch/[id]',
+                      params: { id: String(movie.id), type: 'movie' },
+                    });
+                  }}
+                  style={styles.movieRow}>
                 <Text style={[styles.rank, index < 3 && styles.topRank]}>
                   {String(index + 1).padStart(2, '0')}
                 </Text>
@@ -139,7 +165,8 @@ export default function LeaderboardScreen() {
                     </Text>
                   </View>
                 </View>
-              </View>
+                </SmoothPressable>
+              </Animated.View>
             ))}
           </View>
         )}

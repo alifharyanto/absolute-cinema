@@ -5,7 +5,6 @@ import {
   ActivityIndicator,
   Image,
   Platform,
-  Pressable,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -14,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
+import { SmoothPressable } from '@/components/smooth-pressable';
 
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
@@ -185,9 +185,9 @@ export default function WatchScreen() {
 
       {/* Header Tombol Kembali */}
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.backButton}>
+        <SmoothPressable onPress={() => router.back()} style={styles.backButton}>
           <Text style={styles.backText}>← Kembali</Text>
-        </Pressable>
+        </SmoothPressable>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -332,7 +332,7 @@ export default function WatchScreen() {
                     <Text style={styles.sectionHeaderTitle}>Pilih Season:</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalList}>
                       {validSeasons.map((s) => (
-                        <Pressable
+                        <SmoothPressable
                           key={s.id}
                           onPress={() => {
                             setSelectedSeason(s.season_number);
@@ -349,7 +349,7 @@ export default function WatchScreen() {
                             ]}>
                             Season {s.season_number}
                           </Text>
-                        </Pressable>
+                        </SmoothPressable>
                       ))}
                     </ScrollView>
                   </View>
@@ -358,7 +358,7 @@ export default function WatchScreen() {
                 <Text style={styles.sectionHeaderTitle}>Pilih Episode:</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalList}>
                   {Array.from({ length: totalEpisodesInCurrentSeason }, (_, i) => i + 1).map((ep) => (
-                    <Pressable
+                    <SmoothPressable
                       key={ep}
                       onPress={() => setSelectedEpisode(ep)}
                       style={[
@@ -372,7 +372,7 @@ export default function WatchScreen() {
                         ]}>
                         Eps {ep}
                       </Text>
-                    </Pressable>
+                    </SmoothPressable>
                   ))}
                 </ScrollView>
               </View>

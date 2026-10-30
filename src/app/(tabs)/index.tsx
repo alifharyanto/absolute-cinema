@@ -1,4 +1,6 @@
 import { LiquidGlassContainer } from '@/components/liquid-glass';
+import { SmoothPressable } from '@/components/smooth-pressable';
+import { useVisitHistory } from '@/components/visit-history';
 import { useIsHydrated } from '@/hooks/use-is-hydrated';
 import { useRouter } from 'expo-router';
 import {
@@ -15,7 +17,6 @@ import {
     Keyboard,
     Modal,
     Platform,
-    Pressable,
     RefreshControl,
     ScrollView,
     StatusBar,
@@ -249,17 +250,26 @@ function getErrorMessage(error: unknown) {
 function MovieCard({
   movie,
   onPress,
+  isGrid = false,
 }: {
   movie: Movie;
   onPress: (movie: Movie) => void;
+  isGrid?: boolean;
 }) {
   const { width: viewportWidth } = useWindowDimensions();
   const width = useIsHydrated() ? viewportWidth : 390;
-  const cardWidth = width >= 900 ? 150 : width >= 600 ? 128 : 108;
+  const columnCount = width >= 900 ? 6 : width >= 600 ? 4 : 3;
+  const cardWidth = isGrid
+    ? (Math.min(width, 1200) - 40 - (columnCount - 1) * 13) / columnCount
+    : width >= 900
+      ? 150
+      : width >= 600
+        ? 128
+        : 108;
   const posterHeight = cardWidth * 1.48;
 
   return (
-    <Pressable
+    <SmoothPressable
       accessibilityRole="button"
       accessibilityLabel={`View details for ${movie.title}`}
       onPress={() => onPress(movie)}
@@ -295,7 +305,7 @@ function MovieCard({
         {movie.title}
       </Text>
       <Text style={styles.movieRating}>★ {movie.vote_average.toFixed(1)}</Text>
-    </Pressable>
+    </SmoothPressable>
   );
 }
 
@@ -330,6 +340,7 @@ function PersonPortrait({
 
 export default function HomeScreen() {
   const router = useRouter();
+  const { addVisitedMovie } = useVisitHistory();
   const [trendingMovies, setTrendingMovies] = useState<Movie[]>([]);
   const [heroIndex, setHeroIndex] = useState(0);
   const [heroError, setHeroError] = useState('');
@@ -545,7 +556,23 @@ useEffect(() => {
     return () => controller.abort();
   }, [selectedMovie]);
 
+  const recordMovieVisit = useCallback((movie: Movie) => {
+    const mediaType =
+      movie.media_type === 'tv' || (!movie.media_type && !movie.title && movie.name)
+        ? 'tv'
+        : 'movie';
+    addVisitedMovie({
+      id: movie.id,
+      title: movie.title || movie.name || 'Untitled',
+      media_type: mediaType,
+      poster_path: movie.poster_path,
+      release_date: movie.release_date,
+      vote_average: movie.vote_average,
+    });
+  }, [addVisitedMovie]);
+
   const openMovie = useCallback((movie: Movie) => {
+    recordMovieVisit(movie);
     Keyboard.dismiss();
     setTrailer(null);
     setTrailerError('');
@@ -554,9 +581,10 @@ useEffect(() => {
     setCreditsError('');
     setCreditsLoading(true);
     setSelectedMovie(movie);
-  }, []);
+  }, [recordMovieVisit]);
 
   const watchMovie = useCallback((movie: Movie) => {
+    recordMovieVisit(movie);
     Keyboard.dismiss();
     const type =
       movie.media_type === 'tv'
@@ -576,7 +604,7 @@ useEffect(() => {
         type,
       },
     });
-  }, [router]);
+  }, [recordMovieVisit, router]);
 
   const toggleMyList = useCallback((movie: Movie) => {
     setMyList((current) =>
@@ -642,7 +670,7 @@ useEffect(() => {
           />
           {searchLoading && <ActivityIndicator color={COLORS.red} size="small" />}
           {searchText.length > 0 && (
-            <Pressable
+            <SmoothPressable
               accessibilityRole="button"
               accessibilityLabel="Clear search"
               onPress={() => {
@@ -654,7 +682,7 @@ useEffect(() => {
               }}
               style={styles.clearSearch}>
               <Text style={styles.clearSearchText}>×</Text>
-            </Pressable>
+            </SmoothPressable>
           )}
         </View>
       </View>
@@ -755,7 +783,7 @@ useEffect(() => {
                   />
                   <View style={styles.heroPagination}>
                     {trendingMovies.map((movie, index) => (
-                      <Pressable
+                      <SmoothPressable
                         key={movie.id}
                         accessibilityRole="button"
                         accessibilityLabel={`Show trending item ${index + 1}`}
@@ -823,7 +851,7 @@ useEffect(() => {
           setSelectedMovie(null);
         }}>
         <View style={styles.modalRoot}>
-          <Pressable
+          <SmoothPressable
             accessibilityRole="button"
             accessibilityLabel="Close details"
             onPress={() => {
@@ -836,7 +864,7 @@ useEffect(() => {
             tint="dark"
             style={styles.modalSheet}>
             <View style={styles.modalHandle} />
-            <Pressable
+            <SmoothPressable
               accessibilityRole="button"
               accessibilityLabel="Close"
               onPress={() => {
@@ -844,7 +872,7 @@ useEffect(() => {
               }}
               style={styles.closeButton}>
               <Text style={styles.closeButtonText}>×</Text>
-            </Pressable>
+            </SmoothPressable>
             {selectedMovie && (
               <ScrollView
                 showsVerticalScrollIndicator={false}
@@ -870,7 +898,7 @@ useEffect(() => {
                   </View>
                 </View>
 
-                <Pressable
+                <SmoothPressable
                   accessibilityRole="button"
                   accessibilityLabel={`Watch ${selectedMovie.title}`}
                   onPress={() => {
@@ -884,7 +912,7 @@ useEffect(() => {
                     pressed && styles.pressed,
                   ]}>
                   <Text style={styles.watchNowText}>KLIK DETAIL HERE</Text>
-                </Pressable>
+                </SmoothPressable>
 
                 <Text style={styles.trailerTitle}>Trailer</Text>
                 {trailerLoading ? (
@@ -1079,13 +1107,13 @@ function HeroContent({
           {movie.overview || 'No overview available.'}
         </Text>
         <View style={styles.heroActions}>
-          <Pressable
+          <SmoothPressable
             accessibilityRole="button"
             onPress={onPlay}
             style={({ pressed }) => [styles.playButton, pressed && styles.pressed]}>
             <Text style={styles.playButtonText}>▶  Tonton Trailer</Text>
-          </Pressable>
-          <Pressable
+          </SmoothPressable>
+          <SmoothPressable
             accessibilityRole="button"
             onPress={onToggleList}
             style={({ pressed }) => [
@@ -1095,7 +1123,7 @@ function HeroContent({
             <Text style={styles.myListButtonText}>
               {inList ? '✓  Daftar Saya' : '+  Daftar Saya'}
             </Text>
-          </Pressable>
+          </SmoothPressable>
         </View>
       </View>
     </View>
