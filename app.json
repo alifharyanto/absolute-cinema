@@ -1,14 +1,14 @@
 {
   "expo": {
-    "name": "absolute-cinema",
+    "name": "Absolute Cinema",
     "slug": "absolute-cinema",
-    "version": "1.0.0",
+    "version": "2.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "absolutecinema",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/images/icon.png"
     },
     "android": {
       "adaptiveIcon": {
@@ -18,7 +18,7 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.alifharyanto.absolutecinema"
+      "package": "com.fxdev.absolutecinema"
     },
     "web": {
       "output": "server",

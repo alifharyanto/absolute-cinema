@@ -1,4 +1,5 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import { createElement, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -17,17 +18,16 @@ import { WebView } from 'react-native-webview';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
-// Fallback API Key agar build APK standalone tidak 401
 const TMDB_API_KEY =
   process.env.EXPO_PUBLIC_TMDB_API_KEY || 'c60f91fd78775ac4921ecfa40524159c';
 
-// Script Pemblokir Pop-up (Aman Tanpa Merusak Class UI Player VidLink)
-const INJECTED_SAFE_ADBLOCK_JS = `
+// Script Pemblokir Pop-up + Pendeteksi Klik Fullscreen
+const INJECTED_FULLSCREEN_ADBLOCK_JS = `
   (function() {
     window.open = function() { return null; };
     window.onbeforeunload = function() { return null; };
 
-    // Sembunyikan khusus iframe iklan tanpa merusak div internal player
+    // Sembunyikan iklan
     const style = document.createElement('style');
     style.innerHTML = \`
       iframe[src*="ads"], iframe[src*="doubleclick"], .popunder, .popup {
@@ -38,9 +38,28 @@ const INJECTED_SAFE_ADBLOCK_JS = `
     if (document.head) {
       document.head.appendChild(style);
     }
+
+    // Tangkap event perubahan Fullscreen HTML5 di WebView
+    function handleFullscreenChange() {
+      var isFS = !!(document.fullscreenElement || document.webkitFullscreenElement);
+      if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'FULLSCREEN_CHANGE',
+          isFullscreen: isFS
+        }));
+      }
+    }
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
   })();
   true;
 `;
+
+type GenreInfo = {
+  id: number;
+  name: string;
+};
 
 type SeasonInfo = {
   id: number;
@@ -66,6 +85,7 @@ type DetailData = {
   vote_average: number;
   release_date?: string;
   first_air_date?: string;
+  genres?: GenreInfo[];
   number_of_seasons?: number;
   number_of_episodes?: number;
   seasons?: SeasonInfo[];
@@ -85,11 +105,16 @@ export default function WatchScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // State Season & Episode (Khusus TV / Drakor)
   const [selectedSeason, setSelectedSeason] = useState(1);
   const [selectedEpisode, setSelectedEpisode] = useState(1);
 
-  // Reset Season & Episode setiap kali ID film/series berganti
+  // Reset rotasi layar HP ke Vertikal saat meninggalkan halaman
+  useEffect(() => {
+    return () => {
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+    };
+  }, []);
+
   useEffect(() => {
     setSelectedSeason(1);
     setSelectedEpisode(1);
@@ -124,7 +149,6 @@ export default function WatchScreen() {
     fetchDetail();
   }, [id, mediaType]);
 
-  // Single URL Pemutar VidLink
   const embedUrl =
     mediaType === 'tv'
       ? `https://vidlink.pro/tv/${id}/${selectedSeason}/${selectedEpisode}`
@@ -132,6 +156,9 @@ export default function WatchScreen() {
 
   const title = data?.title || data?.name || 'Watch Movie';
   const releaseDate = data?.release_date || data?.first_air_date || 'Tidak diketahui';
+
+  // Format Genre Film/Series
+  const genres = data?.genres?.map((g) => g.name).join(', ');
 
   const directors = [
     ...(data?.created_by ?? []),
@@ -164,7 +191,7 @@ export default function WatchScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* 1. EMBED VIDEO PLAYER VIDLINK */}
+        {/* 1. EMBED VIDEO PLAYER WITH DYNAMIC LANDSCAPE ROTATION & CACHE */}
         <View style={styles.playerContainer}>
           {Platform.OS === 'web' ? (
             createElement('iframe', {
@@ -189,13 +216,37 @@ export default function WatchScreen() {
               javaScriptEnabled={true}
               domStorageEnabled={true}
               allowsInlineMediaPlayback={true}
-              injectedJavaScriptBeforeContentLoaded={INJECTED_SAFE_ADBLOCK_JS}
               
-              // KHUSUS VIDLINK: IZINKAN DATA: URI AGAR WARNING KUNING DAN PLAYER CRASH HILANG
+              // FITUR CACHING MEMORI
+              cacheEnabled={true}
+              cacheMode="LOAD_CACHE_ELSE_NETWORK"
+              incognito={false}
+              thirdPartyCookiesEnabled={true}
+              sharedCookiesEnabled={true}
+
+              injectedJavaScriptBeforeContentLoaded={INJECTED_FULLSCREEN_ADBLOCK_JS}
+              
+              // DYNAMIC ORIENTATION LOCK: Mengizinkan miring ke KANAN maupun KIRI
+              onMessage={(event) => {
+                try {
+                  const message = JSON.parse(event.nativeEvent.data);
+                  if (message.type === 'FULLSCREEN_CHANGE') {
+                    if (message.isFullscreen) {
+                      ScreenOrientation.lockAsync(
+                        ScreenOrientation.OrientationLock.LANDSCAPE
+                      );
+                    } else {
+                      ScreenOrientation.lockAsync(
+                        ScreenOrientation.OrientationLock.PORTRAIT_UP
+                      );
+                    }
+                  }
+                } catch (e) {}
+              }}
+
               onShouldStartLoadWithRequest={(request) => {
                 const url = request.url;
 
-                // 1. Izinkan skema internal data:, blob:, dan about:
                 if (
                   url.startsWith('data:') ||
                   url.startsWith('blob:') ||
@@ -206,7 +257,6 @@ export default function WatchScreen() {
 
                 const lowerUrl = url.toLowerCase();
 
-                // 2. Filter domain resmi VidLink
                 const isAllowed =
                   lowerUrl.includes('vidlink.pro') ||
                   lowerUrl.includes('vapi') ||
@@ -250,6 +300,14 @@ export default function WatchScreen() {
                   {releaseDate}
                 </Text>
 
+                {/* Genre Film / Series */}
+                {genres ? (
+                  <Text style={styles.metaText} numberOfLines={2}>
+                    <Text style={styles.metaLabel}>Genre: </Text>
+                    {genres}
+                  </Text>
+                ) : null}
+
                 {directors ? (
                   <Text style={styles.metaText} numberOfLines={2}>
                     <Text style={styles.metaLabel}>Sutradara: </Text>
@@ -266,7 +324,7 @@ export default function WatchScreen() {
               </View>
             </View>
 
-            {/* Selector Season & Episode (Khusus TV / Drakor) */}
+            {/* Selector Season & Episode */}
             {mediaType === 'tv' && (
               <View style={styles.episodesContainer}>
                 {validSeasons.length > 1 && (
