@@ -2,31 +2,30 @@ import { LiquidGlassContainer } from '@/components/liquid-glass';
 import { useIsHydrated } from '@/hooks/use-is-hydrated';
 import { useRouter } from 'expo-router';
 import {
-  createElement,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
+    createElement,
+    useCallback,
+    useEffect,
+    useRef,
+    useState,
 } from 'react';
 import {
-  ActivityIndicator,
-  FlatList,
-  Image,
-  ImageBackground,
-  Keyboard,
-  Modal,
-  Platform,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TextInput,
-  useWindowDimensions,
-  View,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
+    ActivityIndicator,
+    FlatList,
+    Image,
+    Keyboard,
+    Modal,
+    Platform,
+    Pressable,
+    RefreshControl,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TextInput,
+    useWindowDimensions,
+    View,
+    type NativeScrollEvent,
+    type NativeSyntheticEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
@@ -34,11 +33,13 @@ import { WebView } from 'react-native-webview';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 const PROFILE_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w185';
-const TMDB_API_KEY = process.env.EXPO_PUBLIC_TMDB_API_KEY;
+const TMDB_API_KEY =
+  process.env.EXPO_PUBLIC_TMDB_API_KEY || 'c60f91fd78775ac4921ecfa40524159c';
 
 type Movie = {
   id: number;
   title: string;
+  name?: string;
   overview: string;
   poster_path: string | null;
   backdrop_path: string | null;
@@ -50,6 +51,43 @@ type Movie = {
 type MovieResponse = {
   results: Movie[];
 };
+
+type MultiMediaItem = {
+  id: number;
+  media_type: string;
+  title?: string;
+  name?: string;
+  overview?: string;
+  poster_path: string | null;
+  backdrop_path: string | null;
+  vote_average?: number;
+  release_date?: string;
+  first_air_date?: string;
+};
+
+type MultiMediaResponse = {
+  results: MultiMediaItem[];
+};
+
+function toMovieItems(results: MultiMediaItem[]): Movie[] {
+  return results.flatMap((item) => {
+    if (item.media_type !== 'movie' && item.media_type !== 'tv') {
+      return [];
+    }
+
+    return [{
+      id: item.id,
+      title: item.title || item.name || 'Untitled',
+      name: item.name,
+      overview: item.overview || '',
+      poster_path: item.poster_path,
+      backdrop_path: item.backdrop_path,
+      vote_average: item.vote_average || 0,
+      release_date: item.release_date || item.first_air_date || '',
+      media_type: item.media_type,
+    }];
+  });
+}
 
 type TvShow = {
   id: number;
@@ -191,9 +229,9 @@ async function fetchFromTmdb<T>(
     );
   }
 
-  const separator = endpoint.includes('?') ? '&' : '?';
+  const [path, query] = endpoint.split('?', 2);
   const response = await fetch(
-    `${TMDB_BASE_URL}${endpoint}${separator}api_key=${encodeURIComponent(TMDB_API_KEY)}`,
+    `${TMDB_BASE_URL}${path}?api_key=${encodeURIComponent(TMDB_API_KEY)}${query ? `&${query}` : ''}`,
     { signal },
   );
 
@@ -230,22 +268,29 @@ function MovieCard({
         { width: cardWidth },
         pressed && styles.pressed,
       ]}>
-      {movie.poster_path ? (
-        <Image
-          source={{ uri: `${IMAGE_BASE_URL}${movie.poster_path}` }}
-          style={[styles.poster, { width: cardWidth, height: posterHeight }]}
-          resizeMode="cover"
-        />
-      ) : (
-        <View
-          style={[
-            styles.poster,
-            styles.posterFallback,
-            { width: cardWidth, height: posterHeight },
-          ]}>
-          <Text style={styles.posterFallbackText}>Poster unavailable</Text>
+      <View style={[styles.posterFrame, { width: cardWidth, height: posterHeight }]}>
+        {movie.poster_path ? (
+          <Image
+            source={{ uri: `${IMAGE_BASE_URL}${movie.poster_path}` }}
+            style={[styles.poster, { width: cardWidth, height: posterHeight }]}
+            resizeMode="cover"
+          />
+        ) : (
+          <View
+            style={[
+              styles.poster,
+              styles.posterFallback,
+              { width: cardWidth, height: posterHeight },
+            ]}>
+            <Text style={styles.posterFallbackText}>Poster unavailable</Text>
+          </View>
+        )}
+        <View style={styles.mediaBadge}>
+          <Text style={styles.mediaBadgeText}>
+            {movie.media_type === 'tv' ? 'SERIES' : 'MOVIE'}
+          </Text>
         </View>
-      )}
+      </View>
       <Text numberOfLines={2} style={styles.movieTitle}>
         {movie.title}
       </Text>
@@ -324,7 +369,7 @@ export default function HomeScreen() {
     setHeroError('');
     setSectionErrors({});
     const requests = [
-      fetchFromTmdb<MovieResponse>('/trending/movie/day?language=en-US'),
+      fetchFromTmdb<MultiMediaResponse>('/trending/all/day?language=en-US'),
       ...SECTIONS.map((section) =>
         fetchFromTmdb<MovieResponse | TvResponse>(
           `${section.endpoint}${section.endpoint.includes('?') ? '&' : '?'}language=en-US`,
@@ -336,7 +381,7 @@ export default function HomeScreen() {
 
     if (trendingResult.status === 'fulfilled') {
       setTrendingMovies(
-        (trendingResult.value as MovieResponse).results.slice(0, 3),
+        toMovieItems((trendingResult.value as MultiMediaResponse).results).slice(0, 3),
       );
       setHeroIndex(0);
       currentHeroIndex.current = 0;
@@ -403,7 +448,6 @@ export default function HomeScreen() {
 useEffect(() => {
     const query = searchText.trim();
     if (!query) {
-      setSearchResults([]);
       return;
     }
 
@@ -413,24 +457,12 @@ useEffect(() => {
       setSearchError('');
 
       // Menggunakan /search/multi agar bisa mencari Film sekaligus Drakor / TV Show
-      void fetchFromTmdb<{ results: any[] }>(
-        `/search/multi?query=${encodeURIComponent(query)}&language=en-US&include_adult=false`,
+      void fetchFromTmdb<MultiMediaResponse>(
+        `/search/multi?language=en-US&query=${encodeURIComponent(query)}&page=1&include_adult=false`,
         controller.signal,
       )
         .then((response) => {
-          const formattedResults: Movie[] = response.results
-            .filter((item) => item.media_type === 'movie' || item.media_type === 'tv')
-            .map((item) => ({
-              id: item.id,
-              title: item.title || item.name || 'Untitled',
-              overview: item.overview || '',
-              poster_path: item.poster_path || null,
-              backdrop_path: item.backdrop_path || null,
-              vote_average: item.vote_average || 0,
-              release_date: item.release_date || item.first_air_date || '',
-              media_type: item.media_type as 'movie' | 'tv',
-            }));
-          setSearchResults(formattedResults);
+          setSearchResults(toMovieItems(response.results));
         })
         .catch((error: unknown) => {
           if (!controller.signal.aborted) {
@@ -524,6 +556,28 @@ useEffect(() => {
     setSelectedMovie(movie);
   }, []);
 
+  const watchMovie = useCallback((movie: Movie) => {
+    Keyboard.dismiss();
+    const type =
+      movie.media_type === 'tv'
+        ? 'tv'
+        : movie.media_type === 'movie'
+          ? 'movie'
+          : movie.title
+            ? 'movie'
+            : movie.name
+              ? 'tv'
+              : 'movie';
+
+    router.push({
+      pathname: '/watch/[id]',
+      params: {
+        id: String(movie.id),
+        type,
+      },
+    });
+  }, [router]);
+
   const toggleMyList = useCallback((movie: Movie) => {
     setMyList((current) =>
       current.includes(movie.id)
@@ -544,7 +598,6 @@ useEffect(() => {
   );
   const cast = movieCredits?.credits?.cast ?? [];
   const indonesiaProviders = movieCredits?.['watch/providers']?.results.ID;
-  const watchLink = indonesiaProviders?.link;
   const displayedProviders = PROVIDER_CATEGORIES.flatMap((category) =>
     (indonesiaProviders?.[category.key] ?? []).map((provider) => ({
       ...provider,
@@ -594,6 +647,9 @@ useEffect(() => {
               accessibilityLabel="Clear search"
               onPress={() => {
                 setSearchText('');
+                setSearchResults([]);
+                setSearchError('');
+                setSearchLoading(false);
                 Keyboard.dismiss();
               }}
               style={styles.clearSearch}>
@@ -628,7 +684,7 @@ useEffect(() => {
             <View style={styles.movieStrip}>
               <View style={styles.searchMovieGrid}>
                 {searchResults.map((movie) => (
-                  <MovieCard key={movie.id} movie={movie} onPress={openMovie} />
+                  <MovieCard key={`${movie.media_type}-${movie.id}`} movie={movie} onPress={watchMovie} />
                 ))}
               </View>
             </View>
@@ -674,14 +730,17 @@ useEffect(() => {
                       );
 
                       return item.backdrop_path ? (
-                        <ImageBackground
-                          source={{
-                            uri: `${IMAGE_BASE_URL}${item.backdrop_path}`,
-                          }}
-                          resizeMode="cover"
+                        <View
                           style={[styles.hero, { width: screenWidth, height: heroHeight }]}>
+                          <Image
+                            source={{
+                              uri: `${IMAGE_BASE_URL}${item.backdrop_path}`,
+                            }}
+                            resizeMode="cover"
+                            style={StyleSheet.absoluteFill}
+                          />
                           {content}
-                        </ImageBackground>
+                        </View>
                       ) : (
                         <View
                           style={[
@@ -748,7 +807,7 @@ useEffect(() => {
                   showsHorizontalScrollIndicator={false}
                   style={styles.movieStrip}
                   contentContainerStyle={styles.movieList}
-                  renderItem={({ item }) => <MovieCard movie={item} onPress={openMovie} />}
+                  renderItem={({ item }) => <MovieCard movie={item} onPress={watchMovie} />}
                 />
               </View>
             ))}
@@ -817,13 +876,7 @@ useEffect(() => {
                   onPress={() => {
                     if (!selectedMovie) return;
 
-                    const movieId = selectedMovie.id;
-                    const mediaType = selectedMovie.media_type ?? 'movie';
-
-                    // 1. Jalankan navigasi menggunakan URL string langsung (paling stabil)
-                    router.push(`/watch/${movieId}?type=${mediaType}`);
-
-                    // 2. Tutup modal setelah perintah navigasi dikirim
+                    watchMovie(selectedMovie);
                     setSelectedMovie(null);
                   }}
                   style={({ pressed }) => [
@@ -1280,11 +1333,29 @@ const styles = StyleSheet.create({
   movieCard: {
     width: 108,
   },
+  posterFrame: {
+    position: 'relative',
+  },
   poster: {
     width: 108,
     height: 160,
     borderRadius: 11,
     backgroundColor: '#111C2B',
+  },
+  mediaBadge: {
+    position: 'absolute',
+    top: 7,
+    left: 7,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: 'rgba(5, 11, 21, 0.88)',
+  },
+  mediaBadgeText: {
+    color: COLORS.text,
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.5,
   },
   posterFallback: {
     alignItems: 'center',

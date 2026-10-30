@@ -16,61 +16,21 @@ import { WebView } from 'react-native-webview';
 
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
-const TMDB_API_KEY = process.env.EXPO_PUBLIC_TMDB_API_KEY;
 
-// User Agent Desktop untuk meyakinkan VidLink memuat player versi Web Desktop
-const DESKTOP_USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+// Fallback API Key agar build APK standalone tidak 401
+const TMDB_API_KEY =
+  process.env.EXPO_PUBLIC_TMDB_API_KEY || 'c60f91fd78775ac4921ecfa40524159c';
 
-// Script Pelindung: Injeksi Viewport Desktop + Anti-Iklan & Anti-Deep Link Shopee
-const INJECTED_FULL_PLAYER_JS = `
+// Script Pemblokir Pop-up (Aman Tanpa Merusak Class UI Player VidLink)
+const INJECTED_SAFE_ADBLOCK_JS = `
   (function() {
     window.open = function() { return null; };
     window.onbeforeunload = function() { return null; };
 
-    // 1. PALSUKAN DIMENSI WINDOW (Memaksa VidLink memuat kontrol Desktop: Progress bar, CC Subtitle, Resolusi, Volume)
-    try {
-      Object.defineProperty(window, 'innerWidth', { get: function() { return 1280; } });
-      Object.defineProperty(window, 'innerHeight', { get: function() { return 720; } });
-      Object.defineProperty(window, 'outerWidth', { get: function() { return 1280; } });
-      Object.defineProperty(window, 'outerHeight', { get: function() { return 720; } });
-    } catch (e) {}
-
-    // 2. TERAPKAN META VIEWPORT DESKTOP
-    var meta = document.querySelector('meta[name="viewport"]');
-    if (!meta) {
-      meta = document.createElement('meta');
-      meta.name = 'viewport';
-      document.head.appendChild(meta);
-    }
-    meta.content = 'width=1280, initial-scale=0.38, maximum-scale=1.0, user-scalable=yes';
-
-    // 3. BLOKIR DEEP LINK KE SHOPEE & APLIKASI EKSTERNAL
-    document.addEventListener('click', function(e) {
-      var target = e.target;
-      while (target && target.tagName !== 'A') {
-        target = target.parentNode;
-      }
-      if (target && target.href) {
-        var href = target.href.toLowerCase();
-        if (
-          href.includes('shopee') || 
-          href.startsWith('intent:') || 
-          href.startsWith('shopee:') ||
-          href.startsWith('market:')
-        ) {
-          e.preventDefault();
-          e.stopPropagation();
-          return false;
-        }
-      }
-    }, true);
-
-    // 4. EMBED CSS ANTI-IKLAN
+    // Sembunyikan khusus iframe iklan tanpa merusak div internal player
     const style = document.createElement('style');
     style.innerHTML = \`
-      iframe[src*="ads"], div[class*="ad"], div[id*="ad"], 
-      .popunder, .popup, [onclick*="window.open"] {
+      iframe[src*="ads"], iframe[src*="doubleclick"], .popunder, .popup {
         display: none !important;
         pointer-events: none !important;
       }
@@ -129,8 +89,11 @@ export default function WatchScreen() {
   const [selectedSeason, setSelectedSeason] = useState(1);
   const [selectedEpisode, setSelectedEpisode] = useState(1);
 
-  // State Indikator Loading Player Video
-  const [isPlayerLoading, setIsPlayerLoading] = useState(true);
+  // Reset Season & Episode setiap kali ID film/series berganti
+  useEffect(() => {
+    setSelectedSeason(1);
+    setSelectedEpisode(1);
+  }, [id, mediaType]);
 
   useEffect(() => {
     if (!id) return;
@@ -161,20 +124,15 @@ export default function WatchScreen() {
     fetchDetail();
   }, [id, mediaType]);
 
-  // URL Embed VidLink dengan Parameter Kustomisasi Warna Tema (#F12B3D)
-  const embedUrl = mediaType === 'tv'
-    ? `https://vidlink.pro/tv/${id}/${selectedSeason}/${selectedEpisode}?primaryColor=f12b3d&secondaryColor=101a29&iconColor=ffffff&autoplay=false`
-    : `https://vidlink.pro/movie/${id}?primaryColor=f12b3d&secondaryColor=101a29&iconColor=ffffff&autoplay=false`;
-
-  // Reset Indikator Loading Player Setiap Kali URL / Episode Berubah
-  useEffect(() => {
-    setIsPlayerLoading(true);
-  }, [embedUrl]);
+  // Single URL Pemutar VidLink
+  const embedUrl =
+    mediaType === 'tv'
+      ? `https://vidlink.pro/tv/${id}/${selectedSeason}/${selectedEpisode}`
+      : `https://vidlink.pro/movie/${id}`;
 
   const title = data?.title || data?.name || 'Watch Movie';
   const releaseDate = data?.release_date || data?.first_air_date || 'Tidak diketahui';
 
-  // Ekstraksi Sutradara & Aktor Utama
   const directors = [
     ...(data?.created_by ?? []),
     ...(data?.credits?.crew?.filter((member) => member.job === 'Director') ?? []),
@@ -206,23 +164,15 @@ export default function WatchScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* 1. EMBED VIDLINK FULL PLAYER WITH CUSTOM CONTROLS & ADBLOCK */}
+        {/* 1. EMBED VIDEO PLAYER VIDLINK */}
         <View style={styles.playerContainer}>
-          {isPlayerLoading && (
-            <View style={styles.playerLoadingOverlay}>
-              <ActivityIndicator size="large" color="#F12B3D" />
-              <Text style={styles.playerLoadingText}>Memuat player video...</Text>
-            </View>
-          )}
-
           {Platform.OS === 'web' ? (
             createElement('iframe', {
               allowFullScreen: true,
-              allow: 'autoplay; encrypted-media; fullscreen; picture-in-picture; screen-wake-lock',
+              allow: 'autoplay; encrypted-media; fullscreen; picture-in-picture',
               referrerPolicy: 'no-referrer',
               title: title,
               src: embedUrl,
-              onLoad: () => setIsPlayerLoading(false),
               style: {
                 width: '100%',
                 height: '100%',
@@ -234,46 +184,33 @@ export default function WatchScreen() {
               key={embedUrl}
               source={{ uri: embedUrl }}
               style={{ flex: 1 }}
-              userAgent={DESKTOP_USER_AGENT}
+              originWhitelist={['*']}
               allowsFullscreenVideo={true}
-              allowsInlineMediaPlayback={true}
-              mediaPlaybackRequiresUserAction={false}
               javaScriptEnabled={true}
               domStorageEnabled={true}
+              allowsInlineMediaPlayback={true}
+              injectedJavaScriptBeforeContentLoaded={INJECTED_SAFE_ADBLOCK_JS}
               
-              // Kunci Utama: Mematikan Multi-Window agar tidak melempar ke App Shopee
-              setSupportMultipleWindows={false}
-              showsHorizontalScrollIndicator={false}
-              showsVerticalScrollIndicator={false}
-              
-              injectedJavaScriptBeforeContentLoaded={INJECTED_FULL_PLAYER_JS}
-              onLoadStart={() => setIsPlayerLoading(true)}
-              onLoadEnd={() => setIsPlayerLoading(false)}
-              
-              // Filter URL Ketat
+              // KHUSUS VIDLINK: IZINKAN DATA: URI AGAR WARNING KUNING DAN PLAYER CRASH HILANG
               onShouldStartLoadWithRequest={(request) => {
-                const url = request.url.toLowerCase();
+                const url = request.url;
 
-                // Blokir skema non-web (shopee://, intent://, market://)
-                if (!url.startsWith('http://') && !url.startsWith('https://') && url !== 'about:blank') {
-                  return false;
-                }
-
-                // Blokir domain e-commerce / iklan
+                // 1. Izinkan skema internal data:, blob:, dan about:
                 if (
-                  url.includes('shopee') ||
-                  url.includes('tokopedia') ||
-                  url.includes('lazada') ||
-                  url.includes('s.shopee')
+                  url.startsWith('data:') ||
+                  url.startsWith('blob:') ||
+                  url.startsWith('about:')
                 ) {
-                  return false;
+                  return true;
                 }
 
-                // Hanya izinkan domain VidLink & Vapi
+                const lowerUrl = url.toLowerCase();
+
+                // 2. Filter domain resmi VidLink
                 const isAllowed =
-                  url.includes('vidlink.pro') ||
-                  url.includes('vapi') ||
-                  url === 'about:blank';
+                  lowerUrl.includes('vidlink.pro') ||
+                  lowerUrl.includes('vapi') ||
+                  lowerUrl === 'about:blank';
 
                 return isAllowed;
               }}
@@ -288,7 +225,6 @@ export default function WatchScreen() {
           <Text style={styles.errorText}>{error}</Text>
         ) : data ? (
           <View style={styles.infoSection}>
-            {/* Header Detail: Poster Kecil + Info */}
             <View style={styles.headerRow}>
               {data.poster_path ? (
                 <Image
@@ -422,21 +358,7 @@ const styles = StyleSheet.create({
   playerContainer: {
     width: '100%',
     aspectRatio: 16 / 9,
-    backgroundColor: '#000000',
-    position: 'relative',
-  },
-  playerLoadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#000000',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 10,
-  },
-  playerLoadingText: {
-    color: '#94A3B8',
-    fontSize: 13,
-    marginTop: 10,
-    fontWeight: '600',
+    backgroundColor: '#000',
   },
   infoSection: {
     padding: 20,

@@ -11,10 +11,16 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_TMDB_API_KEY": "c60f91fd78775ac4921ecfa40524159c"
       }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_TMDB_API_KEY": "c60f91fd78775ac4921ecfa40524159c"
+      }
     }
   }
 }
